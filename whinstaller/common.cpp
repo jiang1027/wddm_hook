@@ -1,8 +1,8 @@
 #include "stdafx.h"
 #include "common.h"
 
-int trace_level = LOG_LEVEL_ERROR;
-int trace_dump_level = LOG_LEVEL_INFO;
+int trace_level = LOG_LEVEL_TRACE;
+int trace_dump_level = LOG_LEVEL_TRACE;
 
 void trace(int level, const char* fmt, ...)
 {

@@ -1,5 +1,5 @@
-////by fanxiushu 2018-09-03
 #include "filter.h"
+#include "trace.h"
 
 static D3DKMDT_2DREGION  Modes[]=
 {
@@ -21,7 +21,7 @@ add_source_mode(D3DKMDT_HVIDPNSOURCEMODESET source_mode_set_hdl,
 	status = source_mode_set_if->pfnCreateNewModeInfo(source_mode_set_hdl,
 		&source_mode);
 	if (!NT_SUCCESS(status)) {
-		DPT("** pfnCreateNewModeInfo(Source) err=0x%X\n", status );
+		pr_err("** pfnCreateNewModeInfo(Source) status(0x%08x)\n", status );
 		return status;
 	}
 
@@ -41,7 +41,7 @@ add_source_mode(D3DKMDT_HVIDPNSOURCEMODESET source_mode_set_hdl,
 
 	status = source_mode_set_if->pfnAddMode(source_mode_set_hdl, source_mode);
 	if (!NT_SUCCESS(status)) {
-		DPT("** pfnAddMode(Source) err=0x%X\n", status );
+		pr_err("** pfnAddMode(Source) status(0x%08x)\n", status );
 		source_mode_set_if->pfnReleaseModeInfo(source_mode_set_hdl, source_mode);
 	}
 
@@ -64,7 +64,7 @@ static NTSTATUS update_source_modes(
 		&source_mode_set_hdl,
 		&source_mode_set_if);
 	if (!NT_SUCCESS(status)) {
-		DPT("** not pfnAcquireSourceModeSet st=0x%X\n", status );
+		pr_err("** not pfnAcquireSourceModeSet status(0x%08x)\n", status );
 		return status;
 	}
 
@@ -73,7 +73,7 @@ static NTSTATUS update_source_modes(
 		&src_mode_info);
 	if (!NT_SUCCESS(status)) {
 		vidpn_if->pfnReleaseSourceModeSet(vidpn_hdl, source_mode_set_hdl);
-		DPT("pfnAcquirePinnedModeInfo(Source) err=0x%X\n", status );
+		pr_err("pfnAcquirePinnedModeInfo(Source) status(0x%08x)\n", status );
 		return status;
 	}
 	////
@@ -86,7 +86,7 @@ static NTSTATUS update_source_modes(
 	///
 	if (status == STATUS_SUCCESS && src_mode_info != NULL) { // pinned mode .
 		///
-		DPT("Source Mode Pinned Mode: 0x%X -> 0x%X\n", curr_path_info->VidPnSourceId, curr_path_info->VidPnTargetId);
+		pr_err("Source Mode Pinned Mode: 0x%X -> 0x%X\n", curr_path_info->VidPnSourceId, curr_path_info->VidPnTargetId);
 		return STATUS_SUCCESS;///已经绑定了，不处理
 	}
 
@@ -98,7 +98,7 @@ static NTSTATUS update_source_modes(
 		&source_mode_set_if);
 
 	if (!NT_SUCCESS(status)) {
-		DPT("** pfnCreateNewSourceModeSet err=0x%X\n", status);
+		pr_err("** pfnCreateNewSourceModeSet status(0x%08x)\n", status);
 		return status;
 	}
 	////
@@ -109,7 +109,7 @@ static NTSTATUS update_source_modes(
 		if (!NT_SUCCESS(status)) {
 			///
 			vidpn_if->pfnReleaseSourceModeSet(vidpn_hdl, source_mode_set_hdl);
-			DPT("add_source_mode err=0x%X\n", status);
+			pr_err("add_source_mode status(0x%08x)\n", status);
 			return status;
 		}
 		////
@@ -121,7 +121,7 @@ static NTSTATUS update_source_modes(
 		source_mode_set_hdl);
 
 	if (!NT_SUCCESS(status)) {
-		DPT("** pfnAssignSourceModeSet err=0x%X\n", status);
+		pr_err("** pfnAssignSourceModeSet status(0x%08x)\n", status);
 		vidpn_if->pfnReleaseSourceModeSet(vidpn_hdl, source_mode_set_hdl);
 	}
 
@@ -142,7 +142,7 @@ add_target_mode(D3DKMDT_HVIDPNTARGETMODESET tgt_mode_set_hdl,
 	status = target_mode_set_if->pfnCreateNewModeInfo(tgt_mode_set_hdl,
 		&target_mode);
 	if (!NT_SUCCESS(status)) {
-		DPT("** pfnCreateNewModeInfo(Target) err=0x%X\n", status );
+		pr_err("** pfnCreateNewModeInfo(Target) status(0x%08x)\n", status );
 		return status;
 	}
 	////
@@ -167,7 +167,7 @@ add_target_mode(D3DKMDT_HVIDPNTARGETMODESET tgt_mode_set_hdl,
 
 	status = target_mode_set_if->pfnAddMode(tgt_mode_set_hdl, target_mode);
 	if (!NT_SUCCESS(status)) {
-		DPT("pfnAddMode failed: 0x%x", status);
+		pr_err("pfnAddMode failed: status(0x%08x)", status);
 		target_mode_set_if->pfnReleaseModeInfo(tgt_mode_set_hdl, target_mode);
 		return status; 
 	}
@@ -191,14 +191,14 @@ update_target_modes(
 		&tgt_mode_set_hdl,
 		&target_mode_set_if);
 	if (!NT_SUCCESS(status)) {
-		DPT("** pfnAcquireTargetModeSet err=0x%X\n", status );
+		pr_err("** pfnAcquireTargetModeSet status(0x%08x)\n", status );
 		return status;
 	}
 
 	status = target_mode_set_if->pfnAcquirePinnedModeInfo(tgt_mode_set_hdl, &tgt_mode_info);
 	if (!NT_SUCCESS(status)) {
 		vidpn_if->pfnReleaseTargetModeSet(vidpn_hdl, tgt_mode_set_hdl);
-		DPT("** pfnAcquirePinnedModeInfo(Source) err=0x%X\n", status );
+		pr_err("** pfnAcquirePinnedModeInfo(Source) status(0x%08x)\n", status );
 		return status;
 	}
 
@@ -210,7 +210,7 @@ update_target_modes(
 	tgt_mode_set_hdl = NULL;
 
 	if (status == STATUS_SUCCESS && tgt_mode_info != NULL) {
-		DPT("Target Mode Pinned Mode: 0x%X -> 0x%X\n", curr_path_info->VidPnSourceId, curr_path_info->VidPnTargetId);
+		pr_err("Target Mode Pinned Mode: 0x%X -> 0x%X\n", curr_path_info->VidPnSourceId, curr_path_info->VidPnTargetId);
 		return STATUS_SUCCESS;///已经绑定了，不处理
 		///
 	}
@@ -221,7 +221,7 @@ update_target_modes(
 		&tgt_mode_set_hdl,
 		&target_mode_set_if);
 	if (!NT_SUCCESS(status)) {
-		DPT("** pfnCreateNewTargetModeSet err=0x%X\n", status );
+		pr_err("** pfnCreateNewTargetModeSet status(0x%08x)\n", status );
 		return status;
 	}
 
@@ -233,7 +233,7 @@ update_target_modes(
 		if (!NT_SUCCESS(status)) {
 			///
 			vidpn_if->pfnReleaseTargetModeSet(vidpn_hdl, tgt_mode_set_hdl);
-			DPT("add_target_mode err=0x%X\n", status);
+			pr_err("add_target_mode status(0x%08x)\n", status);
 			return status;
 		}
 		///
@@ -245,7 +245,7 @@ update_target_modes(
 		tgt_mode_set_hdl);
 
 	if (!NT_SUCCESS(status)) {
-		DPT("** pfnAssignTargetModeSet err=0x%x\n", status );
+		pr_err("** pfnAssignTargetModeSet status(0x%08x)\n", status );
 		vidpn_if->pfnReleaseTargetModeSet(vidpn_hdl, tgt_mode_set_hdl);
 		return status;
 	}
@@ -282,18 +282,18 @@ static NTSTATUS DxgkDdiEnumVidPnCofuncModality_modify(CONST DXGKARG_ENUMVIDPNCOF
 	status = topology_if->pfnAcquireFirstPathInfo(topology_handle, &curr_path_info);
 	if (status == STATUS_GRAPHICS_DATASET_IS_EMPTY) {
 		// Empty topology, nothing to do. 
-		DPT("pfnAcquireFirstPathInfo: Empty topology.\n");
+		pr_err("pfnAcquireFirstPathInfo: Empty topology.\n");
 		return STATUS_SUCCESS;
 	}
 	else if (!NT_SUCCESS(status)) {
-		DPT("pfnAcquireFirstPathInfo failed: 0x%x", status);
+		pr_err("pfnAcquireFirstPathInfo failed, status(0x%08x)", status);
 		return STATUS_NO_MEMORY; ////
 	}
 
 	////
 	do {
 		////对于每个路径
-		DPT("0x%X --> 0x%X\n", curr_path_info->VidPnSourceId, curr_path_info->VidPnTargetId);
+		pr_err("0x%X --> 0x%X\n", curr_path_info->VidPnSourceId, curr_path_info->VidPnTargetId);
 
 		if (curr_path_info->VidPnTargetId == VIDPN_CHILD_UDID) {//路径目标是我们自己的
 			///
@@ -302,9 +302,9 @@ static NTSTATUS DxgkDdiEnumVidPnCofuncModality_modify(CONST DXGKARG_ENUMVIDPNCOF
 			{
 				/////
 				
-				status = update_source_modes(arg->hConstrainingVidPn, curr_path_info, vidpn_if);  DPT("update_source_modes st=0x%X\n",status );
+				status = update_source_modes(arg->hConstrainingVidPn, curr_path_info, vidpn_if);  pr_err("update_source_modes st=0x%X\n",status );
 				if (!NT_SUCCESS(status)) {
-					DPT("** update_source_modes err=0x%X\n", status );
+					pr_err("** update_source_modes status(0x%08x)\n", status );
 				}
 				//////
 			}
@@ -313,9 +313,9 @@ static NTSTATUS DxgkDdiEnumVidPnCofuncModality_modify(CONST DXGKARG_ENUMVIDPNCOF
 			if ((arg->EnumPivotType != D3DKMDT_EPT_VIDPNTARGET) ||
 				(arg->EnumPivot.VidPnTargetId != curr_path_info->VidPnTargetId))
 			{
-				status = update_target_modes(arg->hConstrainingVidPn, curr_path_info, vidpn_if);  DPT("update_target_modes st=0x%X\n", status);
+				status = update_target_modes(arg->hConstrainingVidPn, curr_path_info, vidpn_if);  pr_err("update_target_modes st=0x%X\n", status);
 				if (!NT_SUCCESS(status)) {
-					DPT("** update_target_modes err=0x%X\n", status);
+					pr_err("** update_target_modes status(0x%08x)\n", status);
 				}
 			}
 			////////
@@ -328,12 +328,12 @@ static NTSTATUS DxgkDdiEnumVidPnCofuncModality_modify(CONST DXGKARG_ENUMVIDPNCOF
 
 		if (status == STATUS_GRAPHICS_NO_MORE_ELEMENTS_IN_DATASET) { /// end
 			curr_path_info = NULL;
-	//		DPT("pfnAcquireNextPathInfo no more data.\n");
+	//		pr_err("pfnAcquireNextPathInfo no more data.\n");
 			break;
 		}
 		else if (!NT_SUCCESS(status)) {
 			curr_path_info = NULL;
-			DPT("pfnAcquireNextPathInfo err=0x%X\n", status );
+			pr_err("pfnAcquireNextPathInfo status(0x%08x)\n", status );
 			break;
 		}
 
@@ -348,7 +348,7 @@ NTSTATUS DxgkDdiEnumVidPnCofuncModality(CONST HANDLE  hAdapter,
 {
 	NTSTATUS status = STATUS_SUCCESS;
 
-	DPT("DxgkDdiEnumVidPnCofuncModality: type=%d, 0x%X -> 0x%X,  [%d, %d]\n", 
+	pr_err("DxgkDdiEnumVidPnCofuncModality: type=%d, 0x%X -> 0x%X,  [%d, %d]\n", 
 		pEnumCofuncModalityArg->EnumPivotType, pEnumCofuncModalityArg->EnumPivot.VidPnSourceId, 
 		pEnumCofuncModalityArg->EnumPivot.VidPnTargetId, wf->vidpn_source_count, wf->vidpn_target_count );
 	///
@@ -357,7 +357,7 @@ NTSTATUS DxgkDdiEnumVidPnCofuncModality(CONST HANDLE  hAdapter,
 	////
 	status = wf->orgDpiFunc.DxgkDdiEnumVidPnCofuncModality(hAdapter, pEnumCofuncModalityArg);
 	if (!NT_SUCCESS(status)) {
-		DPT("** DxgkDdiEnumVidPnCofuncModality err=0x%X\n", status );
+		pr_err("** DxgkDdiEnumVidPnCofuncModality err=0x%X\n", status );
 	}
 	return status;
 }
@@ -371,10 +371,10 @@ NTSTATUS DxgkDdiIsSupportedVidPn(
 	status = wf->orgDpiFunc.DxgkDdiIsSupportedVidPn(hAdapter, pIsSupportedVidPn);
 
 	if (NT_SUCCESS(status)) {
-		DPT("DxgkDdiIsSupportedVidPn handle=%p, supported=%d, \n", pIsSupportedVidPn->hDesiredVidPn, pIsSupportedVidPn->IsVidPnSupported );
+		pr_err("DxgkDdiIsSupportedVidPn handle=%p, supported=%d, \n", pIsSupportedVidPn->hDesiredVidPn, pIsSupportedVidPn->IsVidPnSupported );
 	}
 	else {
-		DPT("** DxgkDdiIsSupportedVidPn err=0x%X, handle=%p, supported=%d\n", status , pIsSupportedVidPn->hDesiredVidPn, pIsSupportedVidPn->IsVidPnSupported );
+		pr_err("** DxgkDdiIsSupportedVidPn err=0x%X, handle=%p, supported=%d\n", status , pIsSupportedVidPn->hDesiredVidPn, pIsSupportedVidPn->IsVidPnSupported );
 	}
 
 	return status;
@@ -390,7 +390,7 @@ NTSTATUS DxgkDdiCommitVidPn(
 
 //	if (!NT_SUCCESS(status)) {
 		///
-		DPT(" DxgkDdiCommitVidPn st=0x%X\n", status );
+		pr_err(" DxgkDdiCommitVidPn status(0x%08x)\n", status );
 //	}
 
 	////
@@ -405,7 +405,7 @@ NTSTATUS DxgkDdiSetVidPnSourceVisibility(
 
 	status = wf->orgDpiFunc.DxgkDdiSetVidPnSourceVisibility(hAdapter, pSetVidPnSourceVisibility);
 
-	DPT(" DxgkDdiSetVidPnSourceVisibility sourceId=0x%X, visible=0x%X, st=0x%X\n", pSetVidPnSourceVisibility->VidPnSourceId, pSetVidPnSourceVisibility->Visible ,status );
+	pr_err(" DxgkDdiSetVidPnSourceVisibility sourceId=0x%X, visible=0x%X, st=0x%X\n", pSetVidPnSourceVisibility->VidPnSourceId, pSetVidPnSourceVisibility->Visible ,status );
 
 	return status;
 }
@@ -418,7 +418,7 @@ NTSTATUS APIENTRY DxgkDdiSetVidPnSourceAddress(
 
 	status = wf->orgDpiFunc.DxgkDdiSetVidPnSourceAddress(hAdapter, pSetVidPnSourceAddress );
 
-	DPT("DxgkDdiSetVidPnSourceAddress sourceId=0x%X, paddr=%llu, st=0x%X\n", pSetVidPnSourceAddress->VidPnSourceId, pSetVidPnSourceAddress->PrimaryAddress.QuadPart, status );
+	pr_err("DxgkDdiSetVidPnSourceAddress sourceId=0x%X, paddr=%llu, st=0x%X\n", pSetVidPnSourceAddress->VidPnSourceId, pSetVidPnSourceAddress->PrimaryAddress.QuadPart, status );
 	return status;
 }
 

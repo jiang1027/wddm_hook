@@ -1,6 +1,5 @@
-/// by fanxiushu 2018-08-29
-
-#pragma once
+#ifndef FILTER_INC
+#define FILTER_INC
 
 #include <ntddk.h>
 #include <wdm.h>
@@ -12,20 +11,10 @@
 #include <Dispmprt.h>
 #include <d3dkmdt.h>
 
-////////////////////////////////////////////////////////////
-#ifdef DBG
-#define DPT   DbgPrint
-#else
-#define DPT   //
-#endif
 
 ///定义VIDPN中子设备ID，
 #define VIDPN_CHILD_UDID             0x667b0099
 
-/////////
-///0x23003F , dxgkrnl.sys 导出注册函数 DXGKRNL_DPIINITIALIZE
-#define IOCTL_VIDEO_DDI_FUNC_REGISTER \
-	CTL_CODE( FILE_DEVICE_VIDEO, 0xF, METHOD_NEITHER, FILE_ANY_ACCESS  )
 
 typedef __checkReturn NTSTATUS
 DXGKRNL_DPIINITIALIZE(
@@ -82,8 +71,9 @@ struct wddm_filter_t
 
 	LIST_ENTRY              vidpn_if_head;
 	LIST_ENTRY              topology_if_head;
-	////
-	DRIVER_INITIALIZATION_DATA  orgDpiFunc;  //原始的DRIVER_INITIALIZATION_DATA
+	
+	BOOLEAN hooked;
+	DRIVER_INITIALIZATION_DATA  orgDpiFunc;
 
 	ULONG                       vidpn_source_count;
 	ULONG                       vidpn_target_count;
@@ -91,12 +81,12 @@ struct wddm_filter_t
 
 };
 
-extern struct wddm_filter_t __gbl_wddm_filter;
-#define wf (&(__gbl_wddm_filter))
+extern struct wddm_filter_t WddmHookGlobal;
+#define wf (&(WddmHookGlobal))
 #define wf_lock()   KeAcquireSpinLock(&wf->spin_lock, &wf->kirql);
 #define wf_unlock() KeReleaseSpinLock(&wf->spin_lock, wf->kirql);
 
-////////////////function
+
 NTSTATUS create_wddm_filter_ctrl_device(PDRIVER_OBJECT drvObj);
 
 NTSTATUS call_lower_driver(PIRP irp);
@@ -105,6 +95,12 @@ NTSTATUS DpiInitialize(
 	PDRIVER_OBJECT DriverObject,
 	PUNICODE_STRING RegistryPath,
 	DRIVER_INITIALIZATION_DATA* DriverInitData);
+
+NTSTATUS Win10MonitorDpiInitialize(
+	PDRIVER_OBJECT DriverObject,
+	PUNICODE_STRING RegistryPath,
+	DRIVER_INITIALIZATION_DATA* DriverInitData
+);
 
 NTSTATUS DxgkDdiEnumVidPnCofuncModality(CONST HANDLE  hAdapter, 
 	CONST DXGKARG_ENUMVIDPNCOFUNCMODALITY* CONST  pEnumCofuncModalityArg);
@@ -126,3 +122,19 @@ NTSTATUS APIENTRY DxgkDdiSetVidPnSourceAddress(
 	const DXGKARG_SETVIDPNSOURCEADDRESS *pSetVidPnSourceAddress);
 
 
+DXGKDDI_ADD_DEVICE               Filter_DxgkDdiAddDevice;
+DXGKDDI_START_DEVICE             Filter_DxgkDdiStartDevice;
+DXGKDDI_STOP_DEVICE              Filter_DxgkDdiStopDevice;
+DXGKDDI_REMOVE_DEVICE            Filter_DxgkDdiRemoveDevice;
+DXGKDDI_QUERY_CHILD_RELATIONS    Filter_DxgkDdiQueryChildRelations;
+DXGKDDI_QUERY_CHILD_STATUS       Filter_DxgkDdiQueryChildStatus;
+DXGKDDI_QUERY_DEVICE_DESCRIPTOR  Filter_DxgkDdiQueryDeviceDescriptor;
+DXGKDDI_ISSUPPORTEDVIDPN         Filter_DxgkDdiIsSupportedVidPn;
+DXGKDDI_ENUMVIDPNCOFUNCMODALITY  Filter_DxgkDdiEnumVidPnCofuncModality;
+DXGKDDI_SETVIDPNSOURCEADDRESS    Filter_DxgkDdiSetVidPnSourceAddress; 
+DXGKDDI_SETVIDPNSOURCEVISIBILITY Filter_DxgkDdiSetVidPnSourceVisibility;
+DXGKDDI_COMMITVIDPN              Filter_DxgkDdiCommitVidPn;
+
+
+#endif /* FILTER_INC */
+/* end of file */

@@ -1,17 +1,16 @@
-/// by fanxiushu 2018-08-31
-
 #include "filter.h"
+#include "trace.h"
 
 static NTSTATUS DxgkDdiAddDevice(
 	IN_CONST_PDEVICE_OBJECT PhysicalDeviceObject,
 	OUT PVOID *MiniportDeviceContext)
 {
-	DPT("Hook: DxgkDdiAddDevice. \n");
+	pr_err("Hook: DxgkDdiAddDevice. \n");
 	return wf->orgDpiFunc.DxgkDdiAddDevice(PhysicalDeviceObject, MiniportDeviceContext);
 }
 static NTSTATUS DxgkDdiRemoveDevice(IN PVOID MiniportDeviceContext)
 {
-	DPT("Hook: DxgkDdiRemoveDevice\n");
+	pr_err("Hook: DxgkDdiRemoveDevice\n");
 	return wf->orgDpiFunc.DxgkDdiRemoveDevice(MiniportDeviceContext);
 }
 
@@ -84,12 +83,12 @@ static struct vidpn_paths_t* enum_all_paths(IN_CONST_D3DKMDT_HVIDPNTOPOLOGY topo
 
 		if (status == STATUS_GRAPHICS_NO_MORE_ELEMENTS_IN_DATASET) { /// end
 			curr_path_info = NULL;
-			//		DPT("pfnAcquireNextPathInfo no more data.\n");
+			//		pr_err("pfnAcquireNextPathInfo no more data.\n");
 			break;
 		}
 		else if (!NT_SUCCESS(status)) {
 			curr_path_info = NULL;
-			DPT("pfnAcquireNextPathInfo err=0x%X\n", status);
+			pr_err("pfnAcquireNextPathInfo err=0x%X\n", status);
 			break;
 		}
 		////
@@ -114,7 +113,7 @@ NTSTATUS pfnGetNumPaths(
 			if (intf->paths && pNumPaths) {
 				*pNumPaths = intf->paths->num_paths;
 				wf_unlock();
-				DPT("pfnGetNumPaths Cache called num=%d\n", *pNumPaths);
+				pr_err("pfnGetNumPaths Cache called num=%d\n", *pNumPaths);
 				return STATUS_SUCCESS;
 			}
 			break;
@@ -127,7 +126,7 @@ NTSTATUS pfnGetNumPaths(
 	}
 
 	status = ptr_pfnGetNumPaths(hVidPnTopology, pNumPaths);
-	DPT("pfnGetNumPaths called num=%d\n", *pNumPaths );
+	pr_err("pfnGetNumPaths called num=%d\n", *pNumPaths );
 
 	return status;
 }
@@ -146,7 +145,7 @@ NTSTATUS pfnGetNumPathsFromSource(
 			if (intf->paths && pNumPathsFromSource && VidPnSourceId < wf->vidpn_source_count ) {
 				*pNumPathsFromSource = intf->paths->target_paths[VidPnSourceId]->num;
 				wf_unlock();
-				DPT("pfnGetNumPathsFromSource Cache called. num=%d\n", *pNumPathsFromSource);
+				pr_err("pfnGetNumPathsFromSource Cache called. num=%d\n", *pNumPathsFromSource);
 				return STATUS_SUCCESS;
 			}
 			break;
@@ -160,7 +159,7 @@ NTSTATUS pfnGetNumPathsFromSource(
 
 	status = ptr_pfnGetNumPathsFromSource(hVidPnTopology, VidPnSourceId, pNumPathsFromSource);
 
-	DPT("pfnGetNumPathsFromSource called. num=%d\n", *pNumPathsFromSource);
+	pr_err("pfnGetNumPathsFromSource called. num=%d\n", *pNumPathsFromSource);
 	return status;
 }
 NTSTATUS pfnEnumPathTargetsFromSource(
@@ -179,12 +178,12 @@ NTSTATUS pfnEnumPathTargetsFromSource(
 			if (intf->paths && VidPnSourceId < wf->vidpn_source_count && pVidPnTargetId ) {
 				if (VidPnPresentPathIndex >= intf->paths->target_paths[VidPnSourceId]->num) {
 					wf_unlock();
-					DPT("VidPnPresentPathIndex >= intf->paths->target_path_num[VidPnSourceId]\n");
+					pr_err("VidPnPresentPathIndex >= intf->paths->target_path_num[VidPnSourceId]\n");
 					return STATUS_INVALID_PARAMETER;
 				}
 				*pVidPnTargetId = intf->paths->target_paths[VidPnSourceId]->ids[VidPnPresentPathIndex]; ////
 				wf_unlock();
-				DPT("pfnEnumPathTargetsFromSource Cache called sourceId=%d, index=%d, targetid=%d, st=0x%X\n", VidPnSourceId, VidPnPresentPathIndex, *pVidPnTargetId, status);
+				pr_err("pfnEnumPathTargetsFromSource Cache called sourceId=%d, index=%d, targetid=%d, st=0x%X\n", VidPnSourceId, VidPnPresentPathIndex, *pVidPnTargetId, status);
 				return STATUS_SUCCESS;
 			}
 			break;
@@ -198,7 +197,7 @@ NTSTATUS pfnEnumPathTargetsFromSource(
 
 	status = ptr_pfnEnumPathTargetsFromSource(hVidPnTopology, VidPnSourceId, VidPnPresentPathIndex, pVidPnTargetId);
 
-	DPT("pfnEnumPathTargetsFromSource called sourceId=%d, index=%d, targetid=%d, st=0x%X\n", VidPnSourceId, VidPnPresentPathIndex, *pVidPnTargetId, status );
+	pr_err("pfnEnumPathTargetsFromSource called sourceId=%d, index=%d, targetid=%d, st=0x%X\n", VidPnSourceId, VidPnPresentPathIndex, *pVidPnTargetId, status );
 
 	return status;
 }
@@ -258,7 +257,7 @@ static NTSTATUS pfnAcquireFirstPathInfo(
 	wf_unlock();
 	///
 	if (!ptr_pfnAcquireFirstPathInfo) {
-		DPT("** pfnAcquireFirstPathInfo NULL.\n");
+		pr_err("** pfnAcquireFirstPathInfo NULL.\n");
 		return STATUS_INVALID_PARAMETER;
 	}
 
@@ -270,7 +269,7 @@ static NTSTATUS pfnAcquireFirstPathInfo(
 		status = skip_my_target_path(hVidPnTopology, curr_path, ppFirstVidPnPresentPathInfo, ptr_pfnAcquireNextPathInfo, ptr_pfnReleasePathInfo); ////
 	}
 
-//	DPT("ppFirstVidPnPresentPathInfo called. st=0x%X\n", status );
+//	pr_err("ppFirstVidPnPresentPathInfo called. st=0x%X\n", status );
 	/////
 	return status;
 }
@@ -295,7 +294,7 @@ static NTSTATUS pfnAcquireNextPathInfo(
 
 	/////
 	if (!ptr_pfnAcquireNextPathInfo) {
-		DPT("** pfnAcquireNextPathInfo NULL.\n");
+		pr_err("** pfnAcquireNextPathInfo NULL.\n");
 		return STATUS_INVALID_PARAMETER;
 	}
 
@@ -307,7 +306,7 @@ static NTSTATUS pfnAcquireNextPathInfo(
 		status = skip_my_target_path(hVidPnTopology, curr_path, ppNextVidPnPresentPathInfo, ptr_pfnAcquireNextPathInfo, ptr_pfnReleasePathInfo); ////
 	}
 
-//	DPT("pfnAcquireNextPathInfo called. st=0x%X\n", status );
+//	pr_err("pfnAcquireNextPathInfo called. st=0x%X\n", status );
 	return status;
 }
 
@@ -329,12 +328,12 @@ static NTSTATUS pfnGetTopology(
 	wf_unlock();
 
 	if (!ptr_pfnGetTopology) {
-		DPT("pfnGetTopology==NULL.\n");
+		pr_err("pfnGetTopology==NULL.\n");
 		return STATUS_INVALID_PARAMETER;
 	}
 	status = ptr_pfnGetTopology(hVidPn, phVidPnTopology, ppVidPnTopologyInterface);
 
-//	DPT("pfnGetTopology called.\n");
+//	pr_err("pfnGetTopology called.\n");
 	if (NT_SUCCESS(status) && ppVidPnTopologyInterface && *ppVidPnTopologyInterface && phVidPnTopology ) {
 		///重新计算不包含我们自己的target path的路径
 		struct vidpn_paths_t* p =  enum_all_paths(*phVidPnTopology, *ppVidPnTopologyInterface); ///
@@ -454,10 +453,10 @@ static NTSTATUS DxgkDdiStartDevice(
 	DxgkInterface->DxgkCbQueryVidPnInterface = wf->DxgkInterface.DxgkCbQueryVidPnInterface; 
 	
 	///
-	DPT("Hook: DxgkDdiStartDevice status=0x%X.\n", status ); ///
+	pr_err("Hook: DxgkDdiStartDevice status=0x%X.\n", status ); ///
 
 	if (NT_SUCCESS(status)) {
-		DPT("org: DxgkDdiStartDevice, NumberOfVideoPresentSources=%d, NumberOfChildren=%d\n", *NumberOfVideoPresentSources, *NumberOfChildren);
+		pr_err("org: DxgkDdiStartDevice, NumberOfVideoPresentSources=%d, NumberOfChildren=%d\n", *NumberOfVideoPresentSources, *NumberOfChildren);
 		
 		//// 分别增加 1，增加 source 和 target
 		wf->vidpn_source_count = *NumberOfVideoPresentSources; // +1;
@@ -474,7 +473,7 @@ static NTSTATUS DxgkDdiStartDevice(
 }
 static NTSTATUS DxgkDdiStopDevice(IN PVOID MiniportDeviceContext)
 {
-	DPT("Hook: DxgkDdiStopDevice.\n");
+	pr_err("Hook: DxgkDdiStopDevice.\n");
 	return wf->orgDpiFunc.DxgkDdiStopDevice(MiniportDeviceContext);
 }
 
@@ -485,7 +484,7 @@ static NTSTATUS DxgkDdiQueryChildRelations(IN PVOID pvMiniportDeviceContext,
 	NTSTATUS status;
 
 	status = wf->orgDpiFunc.DxgkDdiQueryChildRelations(pvMiniportDeviceContext, pChildRelations, ChildRelationsSize);
-	DPT("Hook: DxgkDdiQueryChildRelations status=0x%X\n", status);
+	pr_err("Hook: DxgkDdiQueryChildRelations status=0x%X\n", status);
 
 	////
 	if (NT_SUCCESS(status)) {
@@ -507,7 +506,7 @@ static NTSTATUS DxgkDdiQueryChildRelations(IN PVOID pvMiniportDeviceContext,
 }
 static NTSTATUS DxgkDdiQueryChildStatus(IN PVOID MiniportDeviceContext, IN PDXGK_CHILD_STATUS ChildStatus, IN BOOLEAN NonDestructiveOnly)
 {
-	DPT("Hook: DxgkDdiQueryChildStatus Uid=0x%X\n", ChildStatus->ChildUid);
+	pr_err("Hook: DxgkDdiQueryChildStatus Uid=0x%X\n", ChildStatus->ChildUid);
 
 	if (ChildStatus->ChildUid == VIDPN_CHILD_UDID) {
 
@@ -521,7 +520,7 @@ static NTSTATUS DxgkDdiQueryChildStatus(IN PVOID MiniportDeviceContext, IN PDXGK
 }
 static NTSTATUS DxgkDdiQueryDeviceDescriptor(IN_CONST_PVOID MiniportDeviceContext, IN_ULONG ChildUid, INOUT_PDXGK_DEVICE_DESCRIPTOR DeviceDescriptor)
 {
-	DPT("Hook: DxgkDdiQueryDeviceDescriptor Uid=0x%X\n", ChildUid);
+	pr_err("Hook: DxgkDdiQueryDeviceDescriptor Uid=0x%X\n", ChildUid);
 
 	if (ChildUid == VIDPN_CHILD_UDID) {
 		///
@@ -531,25 +530,26 @@ static NTSTATUS DxgkDdiQueryDeviceDescriptor(IN_CONST_PVOID MiniportDeviceContex
 	return wf->orgDpiFunc.DxgkDdiQueryDeviceDescriptor(MiniportDeviceContext, ChildUid, DeviceDescriptor);
 }
 
-/////
+DECLARE_CONST_UNICODE_STRING(vm_str, L"\\Driver\\vm3dmp_loader"); // Vmware 3D 
+DECLARE_CONST_UNICODE_STRING(igfx_str, L"\\Driver\\igfx"); // Intel Graphics
+DECLARE_CONST_UNICODE_STRING(nv_str, L"\\Driver\\nvlddmkm"); // Nvidia Graphics
+
+
 NTSTATUS DpiInitialize(
 	PDRIVER_OBJECT DriverObject,
 	PUNICODE_STRING RegistryPath,
 	DRIVER_INITIALIZATION_DATA* DriverInitData)
 {
-	static BOOLEAN  is_hooked = FALSE;
 
-	UNICODE_STRING vm_str; RtlInitUnicodeString(&vm_str, L"\\Driver\\vm3dmp_loader"); // Vmware 3D 
-	UNICODE_STRING igfx_str; RtlInitUnicodeString(&igfx_str, L"\\Driver\\igfx"); // Intel Graphics
-	UNICODE_STRING nv_str; RtlInitUnicodeString(&nv_str, L"\\Driver\\nvlddmkm"); // nvidia Graphics
+	pr_debug("-> DpiInitialize()\n");
+	pr_debug("  DriverName: %S\n", DriverObject->DriverName.Buffer);
 
-	if ( !is_hooked && (
-		 RtlEqualUnicodeString(&vm_str, &DriverObject->DriverName, TRUE) || 
-		 RtlEqualUnicodeString(&nv_str, &DriverObject->DriverName, TRUE) //vmware里的虚拟显卡或者Intel显卡
-		) )
+	if (!wf->hooked && 
+		(RtlEqualUnicodeString(&vm_str, &DriverObject->DriverName, TRUE) || 
+		 RtlEqualUnicodeString(&nv_str, &DriverObject->DriverName, TRUE)))
 	{
 		//这里只HOOK第一个显卡
-		is_hooked = TRUE;
+		wf->hooked = TRUE;
 
 		///
 		//这里复制需要注意：
@@ -575,6 +575,52 @@ NTSTATUS DpiInitialize(
 	}
 	
 	///替换了某些函数后，接着调用 dxgkrnl.sys 回调函数注册
+	return wf->dxgkrnl_dpiInit(DriverObject, RegistryPath, DriverInitData);
+}
+
+
+void SetHookDriverInitData(DRIVER_INITIALIZATION_DATA* DriverInitData)
+{
+#define REPLACE_CALLBACK(name)	\
+	if (DriverInitData->name != NULL) { DriverInitData->name = Filter_##name; }
+
+	REPLACE_CALLBACK(DxgkDdiAddDevice);
+	REPLACE_CALLBACK(DxgkDdiStartDevice);
+	REPLACE_CALLBACK(DxgkDdiStopDevice);
+	REPLACE_CALLBACK(DxgkDdiRemoveDevice);
+	REPLACE_CALLBACK(DxgkDdiQueryChildRelations);
+	REPLACE_CALLBACK(DxgkDdiQueryChildStatus);
+	REPLACE_CALLBACK(DxgkDdiQueryDeviceDescriptor);
+	REPLACE_CALLBACK(DxgkDdiIsSupportedVidPn);
+	REPLACE_CALLBACK(DxgkDdiEnumVidPnCofuncModality);
+	REPLACE_CALLBACK(DxgkDdiSetVidPnSourceAddress);
+	REPLACE_CALLBACK(DxgkDdiSetVidPnSourceVisibility);
+	REPLACE_CALLBACK(DxgkDdiCommitVidPn);
+}
+
+NTSTATUS Win10MonitorDpiInitialize(
+	PDRIVER_OBJECT DriverObject,
+	PUNICODE_STRING RegistryPath,
+	DRIVER_INITIALIZATION_DATA* DriverInitData
+)
+{
+	pr_debug("-> Win10MonitorDpiInitialize()\n");
+	pr_debug("  DriverName: %S\n", DriverObject->DriverName.Buffer);
+
+	if (!wf->hooked &&
+		(RtlEqualUnicodeString(&vm_str, &DriverObject->DriverName, TRUE) ||
+			RtlEqualUnicodeString(&nv_str, &DriverObject->DriverName, TRUE)))
+	{
+		wf->hooked = TRUE;
+
+		pr_info("hooking DriverInitData version(%s)\n", 
+			DxgkrnlVersionStr(DriverInitData->Version));
+
+		RtlCopyMemory(&wf->orgDpiFunc, DriverInitData, sizeof(DRIVER_INITIALIZATION_DATA));
+
+		SetHookDriverInitData(DriverInitData);
+	}
+
 	return wf->dxgkrnl_dpiInit(DriverObject, RegistryPath, DriverInitData);
 }
 

@@ -1,0 +1,9 @@
+user ybjiang winbond
+open 10.130.1.101
+wddmhook
+winbond
+bin
+put Debug\x64\whinstaller.exe
+put Debug\x64\wddmhook.sys
+bye
+

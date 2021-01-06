@@ -1,12 +1,16 @@
-/// by fanxiushu 2018-08-29
-
 #include "filter.h"
+#include "trace.h"
+#include "dlpapi.h"
+
 
 static NTSTATUS commonDispatch(PDEVICE_OBJECT devObj, PIRP irp)
 {
 	PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
 
 	UNREFERENCED_PARAMETER(devObj);
+
+	pr_debug("-> commonDispatch(), Major(%s) Minor(%d)\n",
+		MajorFunctionStr[irpStack->MajorFunction], irpStack->MinorFunction);
 
 	switch (irpStack->MajorFunction)
 	{
@@ -18,28 +22,42 @@ static NTSTATUS commonDispatch(PDEVICE_OBJECT devObj, PIRP irp)
 		break;
 
 	case IRP_MJ_INTERNAL_DEVICE_CONTROL:
-		if (irpStack->Parameters.DeviceIoControl.IoControlCode == IOCTL_VIDEO_DDI_FUNC_REGISTER) {
-			///////显卡驱动在DxgkInitialize函数中调用 IOCTL获取dxgkrnl.sys的注册回调函数，我们hook此处，获取到显卡驱动提供的所有DDI函数
+		pr_info("  IoControlCode(0x%08x)\n", 
+			irpStack->Parameters.DeviceIoControl.IoControlCode);
 
+		switch (irpStack->Parameters.DeviceIoControl.IoControlCode) {
+		case 0x23003F: // win7 DxgkInitialize IoControlCode
 			irp->IoStatus.Information = 0;
 			irp->IoStatus.Status = STATUS_SUCCESS;
 
-			///把我们的回调函数返回给显卡驱动.
 			if (irp->UserBuffer) {
-				///
 				irp->IoStatus.Information = sizeof(PDXGKRNL_DPIINITIALIZE);
 				*((PDXGKRNL_DPIINITIALIZE*)irp->UserBuffer) = DpiInitialize;
 			}
 
-			/////
 			IoCompleteRequest(irp, IO_NO_INCREMENT);
 
 			return STATUS_SUCCESS;
-			///
+
+		case 0x230047: // win10 DxgkInitialize IoControlCode
+			irp->IoStatus.Information = 0;
+			irp->IoStatus.Status = STATUS_SUCCESS;
+
+			if (irp->UserBuffer) {
+				irp->IoStatus.Information = sizeof(PDXGKRNL_DPIINITIALIZE);
+				*((PDXGKRNL_DPIINITIALIZE*)irp->UserBuffer) = Win10MonitorDpiInitialize;
+			}
+
+			IoCompleteRequest(irp, IO_NO_INCREMENT);
+
+			return STATUS_SUCCESS;
+
+		default:
+			break;
 		}
 		break;
 	}
-	////
+	
 	return call_lower_driver(irp);
 }
 
@@ -50,6 +68,8 @@ NTSTATUS DriverEntry(
 {
 	NTSTATUS status = STATUS_SUCCESS;
 
+	pr_debug("-> loading wddmhook driver\n");
+
 	UNREFERENCED_PARAMETER(RegistryPath);
 
 	for (UCHAR i = 0; i < IRP_MJ_MAXIMUM_FUNCTION; ++i) {
@@ -57,8 +77,10 @@ NTSTATUS DriverEntry(
 	}
 
 	status = create_wddm_filter_ctrl_device(DriverObject);
-	///
-	DriverObject->DriverUnload = NULL; ///不允许卸载
+
+	// no unload supported
+	//
+	DriverObject->DriverUnload = NULL;
 
 	return status;
 }
