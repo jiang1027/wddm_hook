@@ -11,6 +11,7 @@
 #include <Dispmprt.h>
 #include <d3dkmdt.h>
 
+DRIVER_UNLOAD WddmHookUnload;
 
 ///定义VIDPN中子设备ID，
 #define VIDPN_CHILD_UDID             0x667b0099
@@ -114,6 +115,8 @@ typedef struct _WDDM_HOOK_GLOBAL
 	LIST_ENTRY              vidpn_if_head;
 	LIST_ENTRY              topology_if_head;
 
+	BOOLEAN fChangeNumberOfChildren;
+
 	BOOLEAN fDumpSourceModeSet;
 	BOOLEAN fDumpPinnedSourceMode;
 	DWORD nMaxSourceModeSetDump;
@@ -133,6 +136,7 @@ typedef struct _WDDM_HOOK_GLOBAL
 	ULONG                       vidpn_target_count;
 	DXGKRNL_INTERFACE           DxgkInterface;
 
+	BOOLEAN fCreateHookDevice;
 	BOOLEAN fHookEnabled;
 
 	KSPIN_LOCK Lock;
@@ -205,7 +209,7 @@ DXGKDDI_ENUMVIDPNCOFUNCMODALITY Filter_DxgkDdiEnumVidPnCofuncModality;
 DXGKDDI_SETVIDPNSOURCEADDRESS Filter_DxgkDdiSetVidPnSourceAddress;
 DXGKDDI_SETVIDPNSOURCEVISIBILITY Filter_DxgkDdiSetVidPnSourceVisibility;
 DXGKDDI_COMMITVIDPN Filter_DxgkDdiCommitVidPn;
-
+DXGKDDI_RECOMMENDMONITORMODES Filter_DxgkDdiRecommendMonitorModes;
 
 #endif /* FILTER_INC */
 /* end of file */

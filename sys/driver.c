@@ -61,6 +61,13 @@ static NTSTATUS commonDispatch(PDEVICE_OBJECT devObj, PIRP irp)
 	return call_lower_driver(irp);
 }
 
+void WddmHookUnload(
+	PDRIVER_OBJECT DriverObject
+)
+{
+	pr_debug("-> WddmHookUnload\n");
+}
+
 NTSTATUS DriverEntry(
 	IN PDRIVER_OBJECT  DriverObject,
 	IN PUNICODE_STRING RegistryPath
@@ -79,32 +86,40 @@ NTSTATUS DriverEntry(
 	InitializeListHead(&Global.vidpn_if_head);
 	InitializeListHead(&Global.topology_if_head);
 
+	Global.fChangeNumberOfChildren = FALSE;
+
 	Global.fDumpSourceModeSet = TRUE;
 	Global.fDumpPinnedSourceMode = TRUE;
-	Global.nMaxSourceModeSetDump = 0;
+	Global.nMaxSourceModeSetDump = -1;
 
 	Global.fDumpTargetModeSet = TRUE;
 	Global.fDumpPinnedTargetMode = TRUE;
 	Global.fDumpPreferredTargetMode = TRUE;
-	Global.nMaxTargetModeSetDump = 0;
+	Global.nMaxTargetModeSetDump = -1;
 
-	Global.nMaxVidPnDump = 20;
+	Global.nMaxVidPnDump = -1;
 	Global.nVidPnDumped = 0;
 
+	Global.fCreateHookDevice = FALSE;
 	Global.fHookEnabled = FALSE;
 
 	KeInitializeSpinLock(&Global.Lock);
 	InitializeListHead(&Global.HookDriverList);
 
-	for (UCHAR i = 0; i < IRP_MJ_MAXIMUM_FUNCTION; ++i) {
-		DriverObject->MajorFunction[i] = commonDispatch;
+	if (Global.fCreateHookDevice) {
+		for (UCHAR i = 0; i < IRP_MJ_MAXIMUM_FUNCTION; ++i) {
+			DriverObject->MajorFunction[i] = commonDispatch;
+		}
+
+		status = create_wddm_filter_ctrl_device(DriverObject);
+		DriverObject->DriverUnload = NULL;
 	}
-
-	status = create_wddm_filter_ctrl_device(DriverObject);
-
-	// no unload supported
-	//
-	DriverObject->DriverUnload = NULL;
+	else {
+		// make driver unload-able
+		//
+		DriverObject->DriverUnload = WddmHookUnload;
+		status = STATUS_UNSUCCESSFUL;
+	}
 
 	return status;
 }

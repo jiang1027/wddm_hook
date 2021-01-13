@@ -242,6 +242,19 @@ const char* D3DKMDT_PIXEL_VALUE_ACCESS_MODE_Name(D3DKMDT_PIXEL_VALUE_ACCESS_MODE
 	}
 }
 
+const char* D3DKMDT_MONITOR_CAPABILITIES_ORIGIN_Name(D3DKMDT_MONITOR_CAPABILITIES_ORIGIN origin)
+{
+	switch (origin) {
+	case D3DKMDT_MCO_UNINITIALIZED: return "Uninitialized";
+	case D3DKMDT_MCO_DEFAULTMONITORPROFILE: return "DefaultMonitorProfile";
+	case D3DKMDT_MCO_MONITORDESCRIPTOR: return "MonitorDescriptor";
+	case D3DKMDT_MCO_MONITORDESCRIPTOR_REGISTRYOVERRIDE: return "MonitorDescriptor-RegistryOverride";
+	case D3DKMDT_MCO_SPECIFICCAP_REGISTRYOVERRIDE: return "Specificcap_RegistryOverride";
+	case D3DKMDT_MCO_DRIVER: return "Driver";
+	default: return "<unknown>";
+	}
+}
+
 void Dump_DXGK_CHILD_STATUS(DXGK_CHILD_STATUS* ChildStatus)
 {
 	pr_info("DXGK_CHILD_STATUS {\n");
@@ -700,6 +713,15 @@ void Dump_VidPnPath(
 	D3DKMDT_VIDPN_PRESENT_PATH* vidPnPathInfo;
 	D3DKMDT_VIDPN_PRESENT_PATH* vidPnNextPathInfo;
 	int nPath = 0;
+	SIZE_T num;
+
+	status = TopologyInterface->pfnGetNumPaths(hTopology, &num);
+	if (status != STATUS_SUCCESS) {
+		pr_err("pfnGetNumPaths() failed, status(0x%08x)\n", status);
+	}
+	else {
+		pr_info("NumOfPath: %d\n", num);
+	}
 
 	status = TopologyInterface->pfnAcquireFirstPathInfo(
 		hTopology, &vidPnPathInfo
@@ -772,14 +794,6 @@ void Dump_VidPnTopology(
 		return;
 	}
 
-	status = topologyInterface->pfnGetNumPaths(hTopology, &nPath);
-	if (!NT_SUCCESS(status)) {
-		pr_err("pfnGetNumPaths() failed, error(0x%08x)\n", status);
-	}
-	else {
-		pr_info("NumPath: %d\n", nPath);
-	}
-
 	Dump_VidPnPath(hVidPn, VidPnInterface, hTopology, topologyInterface);
 }
 
@@ -830,5 +844,82 @@ void Dump_DXGKARG_ENUMVIDPNCOFUNCMODALITY(PWDDM_ADAPTER wddmAdapter, const DXGKA
 	pr_info("    EnumPivot { VidPnSourceId(%d), VidPnTargetId(%d) }\n",
 		EnumCofuncModality->EnumPivot.VidPnSourceId,
 		EnumCofuncModality->EnumPivot.VidPnTargetId);
+	pr_info("}\n");
+}
+
+
+void Dump_DXGKARG_RECOMMENDMONITORMODES(
+	PWDDM_ADAPTER wddmAdapter, 
+	const DXGKARG_RECOMMENDMONITORMODES* const RecommendMonitorModes
+)
+{
+	D3DKMDT_HMONITORSOURCEMODESET handle = RecommendMonitorModes->hMonitorSourceModeSet;
+	const DXGK_MONITORSOURCEMODESET_INTERFACE* iface = RecommendMonitorModes->pMonitorSourceModeSetInterface;
+	const D3DKMDT_MONITOR_SOURCE_MODE* preferredMode = NULL;
+	const D3DKMDT_MONITOR_SOURCE_MODE* monitorMode;
+	const D3DKMDT_MONITOR_SOURCE_MODE* nextMode;
+	NTSTATUS status;
+	SIZE_T num;
+	DWORD index;
+
+	pr_info("DXGKARG_RECOMMENDMONITORMODES {\n");
+
+	status = iface->pfnGetNumModes(handle, &num);
+	if (status != STATUS_SUCCESS) {
+		pr_err("pfnGetNumModes() failed, status(0x%08x)\n", status);
+	}
+	else {
+		pr_info("NumOfModes: %d\n", num);
+	}
+
+	status = iface->pfnAcquirePreferredModeInfo(handle, &preferredMode);
+	if (!NT_SUCCESS(status)) {
+		pr_err("pfnAcquirePreferredModeInfo() failed, status(0x%08x)\n", status);
+	}
+	
+	index = 0;
+	status = iface->pfnAcquireFirstModeInfo(handle, &monitorMode);
+	
+	while (status == STATUS_SUCCESS) {
+
+		BOOLEAN isPrefered = 
+			(preferredMode != NULL && preferredMode->Id == monitorMode->Id);
+
+		pr_info("    Mode %d %s {\n", index++, isPrefered ? "<preferred>" : "");
+		pr_info("        Id: %d\n", monitorMode->Id);
+		pr_info("        VideoSignalInfo {\n");
+		pr_info("            VideoStandard: %s\n", D3DKMDT_VIDEO_SIGNAL_STANDARD_Name(monitorMode->VideoSignalInfo.VideoStandard));
+		pr_info("            TotalSize: %d-%d\n",
+			monitorMode->VideoSignalInfo.TotalSize.cx,
+			monitorMode->VideoSignalInfo.TotalSize.cy);
+		pr_info("            ActiveSize: %d-%d\n",
+			monitorMode->VideoSignalInfo.ActiveSize.cx,
+			monitorMode->VideoSignalInfo.ActiveSize.cy);
+		pr_info("            VSyncFreq: %d-%d\n",
+			monitorMode->VideoSignalInfo.VSyncFreq.Numerator,
+			monitorMode->VideoSignalInfo.VSyncFreq.Denominator);
+		pr_info("            HSyncFreq: %d-%d\n",
+			monitorMode->VideoSignalInfo.HSyncFreq.Numerator,
+			monitorMode->VideoSignalInfo.HSyncFreq.Denominator);
+		pr_info("            PixelRate: %d\n", 
+			monitorMode->VideoSignalInfo.PixelRate);
+		pr_info("            ScanLineOrdering: %s\n", 
+			D3DDDI_VIDEO_SIGNAL_SCANLINE_ORDERING_Name(monitorMode->VideoSignalInfo.ScanLineOrdering));
+		pr_info("        }\n");
+		pr_info("        ColorBasis: %s\n", D3DKMDT_COLOR_BASIS_Name(monitorMode->ColorBasis));
+		pr_info("        Origin: %s\n", D3DKMDT_MONITOR_CAPABILITIES_ORIGIN_Name(monitorMode->Origin));
+		pr_info("        Preference: %s\n", D3DKMDT_MODE_PREFERENCE_Name(monitorMode->Preference));
+		pr_info("    }\n");
+
+		// travel to next mode
+		status = iface->pfnAcquireNextModeInfo(handle, monitorMode, &nextMode);
+		iface->pfnReleaseModeInfo(handle, monitorMode);
+		monitorMode = nextMode;
+	}
+
+	if (preferredMode) {
+		iface->pfnReleaseModeInfo(handle, preferredMode);
+	}
+
 	pr_info("}\n");
 }

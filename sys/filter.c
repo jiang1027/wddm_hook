@@ -196,8 +196,10 @@ Filter_DxgkDdiStartDevice(
 		wddmAdapter->NumberOfVideoPresentSources = *NumberOfVideoPresentSources;
 		wddmAdapter->NumberOfChildren = *NumberOfChildren;
 
-		*NumberOfVideoPresentSources = 1;
-		*NumberOfChildren = 1;
+		if (Global.fChangeNumberOfChildren) {
+			*NumberOfVideoPresentSources = 1;
+			*NumberOfChildren = 1;
+		}
 
 		pr_debug("    NumberOfVideoPresentSources: %d\n", *NumberOfVideoPresentSources);
 		pr_debug("    NumberOfChildren: %d\n", *NumberOfChildren);
@@ -465,12 +467,16 @@ Filter_DxgkDdiEnumVidPnCofuncModality(
 
 	pr_debug("-> Filter_DxgkDdiEnumVidPnCofuncModality()\n");
 
+	pr_info("original constraining VidPn\n");
+	Dump_DXGKARG_ENUMVIDPNCOFUNCMODALITY(wddmAdapter, pEnumCofuncModality);
+	
 	status = DriverInitData->DxgkDdiEnumVidPnCofuncModality(
 		wddmAdapter->MiniportDeviceContext,
 		pEnumCofuncModality
 	);
 
 	if (NT_SUCCESS(status)) {
+		pr_info("result contraining VidPn\n");
 		Dump_DXGKARG_ENUMVIDPNCOFUNCMODALITY(wddmAdapter, pEnumCofuncModality);
 	}
 
@@ -567,6 +573,38 @@ Filter_DxgkDdiCommitVidPn(
 	);
 
 	pr_debug("<- Filter_DxgkDdiCommitVidPn(), status(0x%08x)\n", status);
+
+	return status;
+}
+
+NTSTATUS
+APIENTRY
+Filter_DxgkDdiRecommendMonitorModes(
+	IN_CONST_HANDLE                                 hAdapter,
+	IN_CONST_PDXGKARG_RECOMMENDMONITORMODES_CONST   pRecommendMonitorModes
+)
+{
+	PWDDM_ADAPTER wddmAdapter;
+	DRIVER_INITIALIZATION_DATA* DriverInitData;
+	NTSTATUS status;
+
+	wddmAdapter = WddmHookFindAdapterFromContext(hAdapter);
+	ASSERT(wddmAdapter && wddmAdapter->Signature == WDDM_ADAPTER_SIGNATURE);
+	ASSERT(wddmAdapter->WddmDriver);
+
+	DriverInitData = &wddmAdapter->WddmDriver->DriverInitData;
+	ASSERT(DriverInitData->DxgkDdiRecommendMonitorModes);
+
+	pr_debug("-> Filter_DxgkDdiRecommendMonitorModes()\n");
+
+	Dump_DXGKARG_RECOMMENDMONITORMODES(wddmAdapter, pRecommendMonitorModes);
+
+	status = DriverInitData->DxgkDdiRecommendMonitorModes(
+		wddmAdapter->MiniportDeviceContext,
+		pRecommendMonitorModes
+	);
+
+	pr_debug("<- Filter_DxgkDdiRecommendMonitorModes(), status(0x%08x)\n", status);
 
 	return status;
 }
