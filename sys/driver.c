@@ -45,7 +45,7 @@ static NTSTATUS commonDispatch(PDEVICE_OBJECT devObj, PIRP irp)
 
 			if (irp->UserBuffer) {
 				irp->IoStatus.Information = sizeof(PDXGKRNL_DPIINITIALIZE);
-				*((PDXGKRNL_DPIINITIALIZE*)irp->UserBuffer) = Win10MonitorDpiInitialize;
+				*((PDXGKRNL_DPIINITIALIZE*)irp->UserBuffer) = Win10DpiInitialize;
 			}
 
 			IoCompleteRequest(irp, IO_NO_INCREMENT);
@@ -71,6 +71,30 @@ NTSTATUS DriverEntry(
 	pr_debug("-> loading wddmhook driver\n");
 
 	UNREFERENCED_PARAMETER(RegistryPath);
+
+	RtlZeroMemory(&Global, sizeof(Global));
+
+	Global.DriverObject = DriverObject;
+	KeInitializeSpinLock(&Global.spin_lock);
+	InitializeListHead(&Global.vidpn_if_head);
+	InitializeListHead(&Global.topology_if_head);
+
+	Global.fDumpSourceModeSet = TRUE;
+	Global.fDumpPinnedSourceMode = TRUE;
+	Global.nMaxSourceModeSetDump = 0;
+
+	Global.fDumpTargetModeSet = TRUE;
+	Global.fDumpPinnedTargetMode = TRUE;
+	Global.fDumpPreferredTargetMode = TRUE;
+	Global.nMaxTargetModeSetDump = 0;
+
+	Global.nMaxVidPnDump = 20;
+	Global.nVidPnDumped = 0;
+
+	Global.fHookEnabled = FALSE;
+
+	KeInitializeSpinLock(&Global.Lock);
+	InitializeListHead(&Global.HookDriverList);
 
 	for (UCHAR i = 0; i < IRP_MJ_MAXIMUM_FUNCTION; ++i) {
 		DriverObject->MajorFunction[i] = commonDispatch;

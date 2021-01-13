@@ -1,5 +1,6 @@
 #include "filter.h"
 #include "trace.h"
+#include "helperapi.h"
 
 static NTSTATUS DxgkDdiAddDevice(
 	IN_CONST_PDEVICE_OBJECT PhysicalDeviceObject,
@@ -35,7 +36,7 @@ static struct vidpn_paths_t* enum_all_paths(IN_CONST_D3DKMDT_HVIDPNTOPOLOGY topo
 		return NULL;
 	}
 
-	
+
 	RtlZeroMemory(p, sz);
 	////
 	p->num_paths = (LONG)num;
@@ -45,7 +46,7 @@ static struct vidpn_paths_t* enum_all_paths(IN_CONST_D3DKMDT_HVIDPNTOPOLOGY topo
 	for (i = 0; i < wf->vidpn_source_count; ++i) {
 		p->target_paths[i] = (struct vidpn_target_id*)( ptr + i* ( sizeof(struct vidpn_target_id) + num * sizeof(D3DDDI_VIDEO_PRESENT_TARGET_ID) ) );
 	}
-	////// 
+	//////
 	CONST D3DKMDT_VIDPN_PRESENT_PATH *curr_path_info;
 	CONST D3DKMDT_VIDPN_PRESENT_PATH *next_path_info;
 	status = topology_if->pfnAcquireFirstPathInfo(topology_handle, &curr_path_info);
@@ -67,16 +68,16 @@ static struct vidpn_paths_t* enum_all_paths(IN_CONST_D3DKMDT_HVIDPNTOPOLOGY topo
 			///
 			if (did != VIDPN_CHILD_UDID) {// skip my target path
 				///
-				LONG n = p->target_paths[sid]->num; 
+				LONG n = p->target_paths[sid]->num;
 				p->target_paths[sid]->num++;
-				p->target_paths[sid]->ids[n] = did; 
+				p->target_paths[sid]->ids[n] = did;
 				///
 				t_num++;
 			}
 			///
 		}
 
-		///next 
+		///next
 		status = topology_if->pfnAcquireNextPathInfo(topology_handle, curr_path_info, &next_path_info);
 		topology_if->pfnReleasePathInfo(topology_handle, curr_path_info);
 		curr_path_info = next_path_info;
@@ -206,7 +207,7 @@ static NTSTATUS skip_my_target_path(
 	IN_CONST_D3DKMDT_HVIDPNTOPOLOGY hVidPnTopology,
 	IN_CONST_PD3DKMDT_VIDPN_PRESENT_PATH_CONST pVidPnPresentPathInfo,
 	DEREF_OUT_CONST_PPD3DKMDT_VIDPN_PRESENT_PATH ppNextVidPnPresentPathInfo,
-	DXGKDDI_VIDPNTOPOLOGY_ACQUIRENEXTPATHINFO ptr_pfnAcquireNextPathInfo, 
+	DXGKDDI_VIDPNTOPOLOGY_ACQUIRENEXTPATHINFO ptr_pfnAcquireNextPathInfo,
 	DXGKDDI_VIDPNTOPOLOGY_RELEASEPATHINFO ptr_pfnReleasePathInfo)
 {
 	NTSTATUS status = STATUS_SUCCESS;
@@ -217,9 +218,9 @@ static NTSTATUS skip_my_target_path(
 			break;
 		}
 		/////skip my target id
-		
+
 		status = ptr_pfnAcquireNextPathInfo(hVidPnTopology, curr_path, ppNextVidPnPresentPathInfo );
-		
+
 		ptr_pfnReleasePathInfo(hVidPnTopology, curr_path); /// release pathinfo
 		///
 		if (status == STATUS_GRAPHICS_NO_MORE_ELEMENTS_IN_DATASET) {
@@ -337,9 +338,9 @@ static NTSTATUS pfnGetTopology(
 	if (NT_SUCCESS(status) && ppVidPnTopologyInterface && *ppVidPnTopologyInterface && phVidPnTopology ) {
 		///重新计算不包含我们自己的target path的路径
 		struct vidpn_paths_t* p =  enum_all_paths(*phVidPnTopology, *ppVidPnTopologyInterface); ///
-		PLIST_ENTRY entry; 
+		PLIST_ENTRY entry;
 
-		wf_lock(); 
+		wf_lock();
 
 		struct vidpn_intf_t* intf = NULL;
 		for (entry = wf->topology_if_head.Flink; entry != &wf->topology_if_head; entry = entry->Flink) {
@@ -354,18 +355,18 @@ static NTSTATUS pfnGetTopology(
 			intf = (struct vidpn_intf_t*)ExAllocatePoolWithTag(NonPagedPool, sizeof(struct vidpn_intf_t), 'FXSD');
 			if (intf) {
 				InsertTailList(&wf->topology_if_head, &intf->list);
-				intf->hTopology = *phVidPnTopology; 
+				intf->hTopology = *phVidPnTopology;
 				intf->paths = NULL;
 				/////
 			}
 		}
 		if (intf) {
-			intf->paths = p; 
+			intf->paths = p;
 			///
 			intf->topology_if = **ppVidPnTopologyInterface;
 			intf->mod_topology_if = intf->topology_if;
 			*ppVidPnTopologyInterface = &intf->mod_topology_if; ///
-			
+
 		    ///替换函数
 			intf->mod_topology_if.pfnGetNumPaths = pfnGetNumPaths;
 			intf->mod_topology_if.pfnGetNumPathsFromSource = pfnGetNumPathsFromSource;
@@ -423,7 +424,7 @@ static NTSTATUS DxgkCbQueryVidPnInterface(
 				////
 			}
 		}
-		
+
 		wf_unlock();
 		////
 	}
@@ -440,28 +441,28 @@ static NTSTATUS DxgkDdiStartDevice(
 	OUT PULONG NumberOfChildren)
 {
 	NTSTATUS status = STATUS_SUCCESS;
-	
+
 	////WDDM1.1 到 WDDM2.3 每个都会有不同定义，这里是WDK7下编译，因此只copy WDDM1.1的部分。
 	wf->DxgkInterface = *DxgkInterface; /// save interface function,用于VIDPN设置
 
 	///////替换原来的接口
-	DxgkInterface->DxgkCbQueryVidPnInterface = DxgkCbQueryVidPnInterface; 
-	
+	DxgkInterface->DxgkCbQueryVidPnInterface = DxgkCbQueryVidPnInterface;
+
 	//////
 	status = wf->orgDpiFunc.DxgkDdiStartDevice(MiniportDeviceContext, DxgkStartInfo, DxgkInterface, NumberOfVideoPresentSources, NumberOfChildren);
 	////
-	DxgkInterface->DxgkCbQueryVidPnInterface = wf->DxgkInterface.DxgkCbQueryVidPnInterface; 
-	
+	DxgkInterface->DxgkCbQueryVidPnInterface = wf->DxgkInterface.DxgkCbQueryVidPnInterface;
+
 	///
 	pr_err("Hook: DxgkDdiStartDevice status=0x%X.\n", status ); ///
 
 	if (NT_SUCCESS(status)) {
 		pr_err("org: DxgkDdiStartDevice, NumberOfVideoPresentSources=%d, NumberOfChildren=%d\n", *NumberOfVideoPresentSources, *NumberOfChildren);
-		
+
 		//// 分别增加 1，增加 source 和 target
 		wf->vidpn_source_count = *NumberOfVideoPresentSources; // +1;
 		wf->vidpn_target_count = *NumberOfChildren + 1;
-		
+
 		//////
 		*NumberOfVideoPresentSources = wf->vidpn_source_count;
 		*NumberOfChildren = wf->vidpn_target_count;
@@ -477,8 +478,8 @@ static NTSTATUS DxgkDdiStopDevice(IN PVOID MiniportDeviceContext)
 	return wf->orgDpiFunc.DxgkDdiStopDevice(MiniportDeviceContext);
 }
 
-static NTSTATUS DxgkDdiQueryChildRelations(IN PVOID pvMiniportDeviceContext, 
-	IN OUT PDXGK_CHILD_DESCRIPTOR pChildRelations, 
+static NTSTATUS DxgkDdiQueryChildRelations(IN PVOID pvMiniportDeviceContext,
+	IN OUT PDXGK_CHILD_DESCRIPTOR pChildRelations,
 	IN ULONG ChildRelationsSize)
 {
 	NTSTATUS status;
@@ -510,7 +511,7 @@ static NTSTATUS DxgkDdiQueryChildStatus(IN PVOID MiniportDeviceContext, IN PDXGK
 
 	if (ChildStatus->ChildUid == VIDPN_CHILD_UDID) {
 
-		ChildStatus->HotPlug.Connected = TRUE; /// 
+		ChildStatus->HotPlug.Connected = TRUE; ///
 		///
 		return STATUS_SUCCESS;
 	}
@@ -530,7 +531,7 @@ static NTSTATUS DxgkDdiQueryDeviceDescriptor(IN_CONST_PVOID MiniportDeviceContex
 	return wf->orgDpiFunc.DxgkDdiQueryDeviceDescriptor(MiniportDeviceContext, ChildUid, DeviceDescriptor);
 }
 
-DECLARE_CONST_UNICODE_STRING(vm_str, L"\\Driver\\vm3dmp_loader"); // Vmware 3D 
+DECLARE_CONST_UNICODE_STRING(vm_str, L"\\Driver\\vm3dmp_loader"); // Vmware 3D
 DECLARE_CONST_UNICODE_STRING(igfx_str, L"\\Driver\\igfx"); // Intel Graphics
 DECLARE_CONST_UNICODE_STRING(nv_str, L"\\Driver\\nvlddmkm"); // Nvidia Graphics
 
@@ -544,8 +545,8 @@ NTSTATUS DpiInitialize(
 	pr_debug("-> DpiInitialize()\n");
 	pr_debug("  DriverName: %S\n", DriverObject->DriverName.Buffer);
 
-	if (!wf->hooked && 
-		(RtlEqualUnicodeString(&vm_str, &DriverObject->DriverName, TRUE) || 
+	if (!wf->hooked &&
+		(RtlEqualUnicodeString(&vm_str, &DriverObject->DriverName, TRUE) ||
 		 RtlEqualUnicodeString(&nv_str, &DriverObject->DriverName, TRUE)))
 	{
 		//这里只HOOK第一个显卡
@@ -573,7 +574,7 @@ NTSTATUS DpiInitialize(
 
 		/////
 	}
-	
+
 	///替换了某些函数后，接着调用 dxgkrnl.sys 回调函数注册
 	return wf->dxgkrnl_dpiInit(DriverObject, RegistryPath, DriverInitData);
 }
@@ -591,6 +592,7 @@ void SetHookDriverInitData(DRIVER_INITIALIZATION_DATA* DriverInitData)
 	REPLACE_CALLBACK(DxgkDdiQueryChildRelations);
 	REPLACE_CALLBACK(DxgkDdiQueryChildStatus);
 	REPLACE_CALLBACK(DxgkDdiQueryDeviceDescriptor);
+
 	REPLACE_CALLBACK(DxgkDdiIsSupportedVidPn);
 	REPLACE_CALLBACK(DxgkDdiEnumVidPnCofuncModality);
 	REPLACE_CALLBACK(DxgkDdiSetVidPnSourceAddress);
@@ -598,29 +600,95 @@ void SetHookDriverInitData(DRIVER_INITIALIZATION_DATA* DriverInitData)
 	REPLACE_CALLBACK(DxgkDdiCommitVidPn);
 }
 
-NTSTATUS Win10MonitorDpiInitialize(
+NTSTATUS Win10MyAddDevice(
+	PDRIVER_OBJECT DriverObject,
+	PDEVICE_OBJECT PhysicalDeviceObject
+)
+{
+	PWDDM_DRIVER wddmDriver;
+	PWDDM_ADAPTER wddmAdapter;
+	NTSTATUS status;
+	KIRQL oldIrql;
+
+	wddmDriver = WddmHookFindDriver(DriverObject);
+	ASSERT(wddmDriver);
+	ASSERT(wddmDriver->OrigAddDevice);
+
+	pr_debug("-> Win10MyAddDevice(), PhysicalDeviceObject(%p)\n", PhysicalDeviceObject);
+
+	wddmAdapter = WddmAdapterAlloc(wddmDriver);
+	if (!wddmAdapter) {
+		return STATUS_NO_MEMORY;
+	}
+
+	KeAcquireSpinLock(&wddmDriver->Lock, &oldIrql);
+	InsertTailList(&wddmDriver->AdapterList, &wddmAdapter->List);
+	KeReleaseSpinLock(&wddmDriver->Lock, oldIrql);
+
+	wddmAdapter->PhysicalDeviceObject = PhysicalDeviceObject;
+
+	status = wddmDriver->OrigAddDevice(DriverObject, PhysicalDeviceObject);
+
+	pr_debug("<- Win10MyAddDevice(), status(0x%08x)\n", status);
+
+	return status;
+}
+
+
+NTSTATUS Win10DpiInitialize(
 	PDRIVER_OBJECT DriverObject,
 	PUNICODE_STRING RegistryPath,
 	DRIVER_INITIALIZATION_DATA* DriverInitData
 )
 {
-	pr_debug("-> Win10MonitorDpiInitialize()\n");
-	pr_debug("  DriverName: %S\n", DriverObject->DriverName.Buffer);
+	char drivername[30];
+	PWDDM_DRIVER wddmDriver;
+	NTSTATUS status;
+	KIRQL oldIrql;
 
-	if (!wf->hooked &&
-		(RtlEqualUnicodeString(&vm_str, &DriverObject->DriverName, TRUE) ||
-			RtlEqualUnicodeString(&nv_str, &DriverObject->DriverName, TRUE)))
-	{
-		wf->hooked = TRUE;
+	pr_debug("-> Win10DpiInitialize(), DriverObject(%p)\n", DriverObject);
 
-		pr_info("hooking DriverInitData version(%s)\n", 
-			DxgkrnlVersionStr(DriverInitData->Version));
+	wcs2strn(
+		drivername,
+		DriverObject->DriverName.Buffer,
+		MIN(sizeof(drivername), DriverObject->DriverName.Length)
+	);
 
-		RtlCopyMemory(&wf->orgDpiFunc, DriverInitData, sizeof(DRIVER_INITIALIZATION_DATA));
+	pr_debug("  DriverName: %s\n", drivername);
 
+	wddmDriver = WddmHookFindDriver(DriverObject);
+	if (wddmDriver == NULL) {
+		wddmDriver = WddmDriverAlloc(DriverObject);
+		if (wddmDriver == NULL) {
+			return STATUS_NO_MEMORY;
+		}
+
+		KeAcquireSpinLock(&Global.Lock, &oldIrql);
+		InsertTailList(&Global.HookDriverList, &wddmDriver->List);
+		KeReleaseSpinLock(&Global.Lock, oldIrql);
+	}
+
+	pr_info("hooking DriverInitData version(%s)\n",
+		DxgkrnlVersionStr(DriverInitData->Version));
+
+	RtlCopyMemory(
+		&wddmDriver->DriverInitData,
+		DriverInitData,
+		sizeof(DRIVER_INITIALIZATION_DATA)
+	);
+
+	if (Global.fHookEnabled) {
 		SetHookDriverInitData(DriverInitData);
 	}
 
-	return wf->dxgkrnl_dpiInit(DriverObject, RegistryPath, DriverInitData);
-}
+	status = wf->dxgkrnl_dpiInit(DriverObject, RegistryPath, DriverInitData);
 
+	if (NT_SUCCESS(status)) {
+		wddmDriver->OrigAddDevice = DriverObject->DriverExtension->AddDevice;
+		DriverObject->DriverExtension->AddDevice = Win10MyAddDevice;
+	}
+
+	pr_debug("<- Win10MyDpiInitialize(), status(0x%08x)\n", status);
+
+	return status;
+}

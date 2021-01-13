@@ -155,8 +155,9 @@
   <ItemGroup>
     <ClCompile Include="dlpapi.c" />
     <ClCompile Include="filter.c" />
+    <ClCompile Include="helperapi.c" />
     <ClCompile Include="ioctl.c" />
-    <ClCompile Include="main.c" />
+    <ClCompile Include="driver.c" />
     <ClCompile Include="miniport.c" />
     <ClCompile Include="trace.c" />
     <ClCompile Include="vidpn.c" />
@@ -164,6 +165,7 @@
   <ItemGroup>
     <ClInclude Include="dlpapi.h" />
     <ClInclude Include="filter.h" />
+    <ClInclude Include="helperapi.h" />
     <ClInclude Include="ioctl.h" />
     <ClInclude Include="trace.h" />
   </ItemGroup>

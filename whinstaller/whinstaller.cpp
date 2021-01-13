@@ -11,6 +11,7 @@ BOOL wddmhook_install(const char* szDriverName)
 	SC_HANDLE hService = NULL;
 	TCHAR szPath[MAX_PATH];
 	BOOL bret = FALSE;
+	DWORD dwTagId = 1;
 
 	hScManager = OpenSCManager(NULL, NULL, SC_MANAGER_CONNECT | SC_MANAGER_CREATE_SERVICE);
 	if (hScManager == NULL) {
@@ -30,11 +31,12 @@ BOOL wddmhook_install(const char* szDriverName)
 		szServiceDescription,
 		SERVICE_QUERY_STATUS | SERVICE_START,
 		SERVICE_KERNEL_DRIVER,
-		SERVICE_AUTO_START,
+		SERVICE_SYSTEM_START,
 		SERVICE_ERROR_NORMAL,
 		szPath,
 		szServiceGroup, 
-		NULL, NULL, NULL, NULL
+		&dwTagId, 
+		NULL, NULL, NULL
 	);
 
 	if (hService == NULL) {
@@ -109,6 +111,34 @@ int __cdecl main(int argc, char* argv[])
 	return 0;
 }
 
+BOOL UpdateServiceTag(DWORD tag)
+{
+	HKEY hkey;
+	LONG ret;
+	char subkey[MAX_PATH] = { 0 };
+	BOOL bret = FALSE;
+
+	_snprintf(subkey, sizeof(subkey), "System\\CurrentControlSet\\Services\\%s", szServiceName);
+	ret = RegOpenKey(HKEY_LOCAL_MACHINE, subkey, &hkey);
+	if (ret != ERROR_SUCCESS) {
+		pr_err("open %s service key failed, error(%d)\n", szServiceName, GetLastError());
+		return FALSE;
+	}
+
+	ret = RegSetValueEx(hkey, "Tag", 0, REG_DWORD, (BYTE*)&tag, sizeof(tag));
+	if (ret != ERROR_SUCCESS) {
+		pr_err("set Tag value failed, error(%d)\n", GetLastError());
+		goto Cleanup;
+	}
+
+	bret = TRUE;
+
+Cleanup:
+	RegCloseKey(hkey);
+	return bret;
+}
+
+
 int cmdInstall(int argc, char* argv[])
 {
 	const char* szDriverName = "wddmhook.sys";
@@ -121,6 +151,10 @@ int cmdInstall(int argc, char* argv[])
 		szDriverName = argv[2];
 	}
 
-	wddmhook_install(szDriverName);
+	BOOL bret = wddmhook_install(szDriverName);
+	if (bret) {
+		bret = UpdateServiceTag(1);
+	}
+
 	return 0;
 }
