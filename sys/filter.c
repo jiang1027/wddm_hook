@@ -3,6 +3,7 @@
 #include "trace.h"
 #include "dlpapi.h"
 #include "helperapi.h"
+#include "DxgkCb.h"
 
 WDDM_HOOK_GLOBAL Global;
 
@@ -178,6 +179,8 @@ Filter_DxgkDdiStartDevice(
 	DriverInitData = &wddmAdapter->WddmDriver->DriverInitData;
 	ASSERT(DriverInitData->DxgkDdiStartDevice);
 
+	DxgkInterface = Filter_SetupDxgkInterfaceHook(wddmAdapter, DxgkInterface);
+
 	status = DriverInitData->DxgkDdiStartDevice(
 		wddmAdapter->MiniportDeviceContext,
 		DxgkStartInfo,
@@ -187,12 +190,6 @@ Filter_DxgkDdiStartDevice(
 	);
 
 	if (NT_SUCCESS(status)) {
-		RtlCopyMemory(
-			&wddmAdapter->DxgkInterface, 
-			DxgkInterface, 
-			sizeof(*DxgkInterface)
-		);
-
 		wddmAdapter->NumberOfVideoPresentSources = *NumberOfVideoPresentSources;
 		wddmAdapter->NumberOfChildren = *NumberOfChildren;
 
@@ -315,7 +312,10 @@ Filter_DxgkDdiQueryChildRelations(
 
 	if (NT_SUCCESS(status)) {
 		DWORD n = fullRelationsSize / sizeof(DXGK_CHILD_DESCRIPTOR);
+
+		TraceIndent();
 		Dump_DXGK_CHILD_DESCRIPTOR(fullRelations, n);
+		TraceUnindent();
 
 		n = ChildRelationsSize / sizeof(DXGK_CHILD_DESCRIPTOR);
 
@@ -364,7 +364,9 @@ Filter_DxgkDdiQueryChildStatus(
 	);
 
 	if (NT_SUCCESS(status)) {
+		TraceIndent();
 		Dump_DXGK_CHILD_STATUS(ChildStatus);
+		TraceUnindent();
 	}
 	
 	pr_debug("<- Filter_DxgkDdiQueryChildStatus(), status(0x%08x)\n", status);
@@ -466,6 +468,7 @@ Filter_DxgkDdiEnumVidPnCofuncModality(
 	ASSERT(DriverInitData->DxgkDdiEnumVidPnCofuncModality);
 
 	pr_debug("-> Filter_DxgkDdiEnumVidPnCofuncModality()\n");
+	TraceIndent();
 
 	pr_info("original constraining VidPn\n");
 	Dump_DXGKARG_ENUMVIDPNCOFUNCMODALITY(wddmAdapter, pEnumCofuncModality);
@@ -476,9 +479,11 @@ Filter_DxgkDdiEnumVidPnCofuncModality(
 	);
 
 	if (NT_SUCCESS(status)) {
-		pr_info("result contraining VidPn\n");
+		pr_info("result constraining VidPn\n");
 		Dump_DXGKARG_ENUMVIDPNCOFUNCMODALITY(wddmAdapter, pEnumCofuncModality);
 	}
+
+	TraceUnindent();
 
 	pr_debug("<- Filter_DxgkDdiEnumVidPnCofuncModality(), status(0x%08x)\n", status);
 	return status;
@@ -534,7 +539,10 @@ Filter_DxgkDdiSetVidPnSourceVisibility(
 	DriverInitData = &wddmAdapter->WddmDriver->DriverInitData;
 	ASSERT(DriverInitData->DxgkDdiSetVidPnSourceVisibility);
 
-	pr_debug("-> Filter_DxgkDdiSetVidPnSourceVisibility()\n");
+	pr_debug("-> Filter_DxgkDdiSetVidPnSourceVisibility()\n"
+		"    VidPnSourceId(%d), Visible(%d)\n",
+		pSetVidPnSourceVisibility->VidPnSourceId, 
+		pSetVidPnSourceVisibility->Visible);
 
 	status = DriverInitData->DxgkDdiSetVidPnSourceVisibility(
 		wddmAdapter->MiniportDeviceContext,
@@ -566,11 +574,15 @@ Filter_DxgkDdiCommitVidPn(
 	ASSERT(DriverInitData->DxgkDdiCommitVidPn);
 
 	pr_debug("-> Filter_DxgkDdiCommitVidPn()\n");
+	TraceIndent();
+	Dump_DXGKARG_COMMITVIDPN(wddmAdapter, pCommitVidPn);
 
 	status = DriverInitData->DxgkDdiCommitVidPn(
 		wddmAdapter->MiniportDeviceContext,
 		pCommitVidPn
 	);
+
+	TraceUnindent();
 
 	pr_debug("<- Filter_DxgkDdiCommitVidPn(), status(0x%08x)\n", status);
 
@@ -597,12 +609,18 @@ Filter_DxgkDdiRecommendMonitorModes(
 
 	pr_debug("-> Filter_DxgkDdiRecommendMonitorModes()\n");
 
+	pr_debug("original monitors\n");
 	Dump_DXGKARG_RECOMMENDMONITORMODES(wddmAdapter, pRecommendMonitorModes);
 
 	status = DriverInitData->DxgkDdiRecommendMonitorModes(
 		wddmAdapter->MiniportDeviceContext,
 		pRecommendMonitorModes
 	);
+
+	if (status == STATUS_SUCCESS) {
+		pr_debug("modified monitors\n");
+		Dump_DXGKARG_RECOMMENDMONITORMODES(wddmAdapter, pRecommendMonitorModes);
+	}
 
 	pr_debug("<- Filter_DxgkDdiRecommendMonitorModes(), status(0x%08x)\n", status);
 
@@ -678,57 +696,10 @@ PWDDM_DRIVER WddmHookFindDriver(PDRIVER_OBJECT DriverObject)
 	return wddmdriver;
 }
 
-static PWDDM_ADAPTER WddmHookFindAdapter(
-	PDEVICE_OBJECT PhysicalDeviceObject,
-	PVOID MiniportDeviceContext
-)
-{
-	KIRQL OldIrql;
-	PLIST_ENTRY Entry;
-	PWDDM_DRIVER wddmDriver = NULL;
-	PWDDM_ADAPTER wddmAdapter = NULL;
-
-	KeAcquireSpinLock(&Global.Lock, &OldIrql);
-
-	Entry = Global.HookDriverList.Flink;
-	while (Entry != &Global.HookDriverList) {
-		wddmDriver = CONTAINING_RECORD(Entry, WDDM_DRIVER, List);
-
-		ASSERT(wddmDriver->Signature == WDDM_DRIVER_SIGNATURE);
-
-		wddmAdapter = WddmDriverFindAdapter(
-			wddmDriver, 
-			PhysicalDeviceObject, 
-			MiniportDeviceContext
-		);
-		if (wddmAdapter) {
-			break;
-		}
-
-		Entry = Entry->Flink;
-	}
-
-	KeReleaseSpinLock(&Global.Lock, OldIrql);
-
-	return wddmAdapter;
-}
-
-
-PWDDM_ADAPTER WddmHookFindAdapterFromPdo(PDEVICE_OBJECT PhysicalDeviceObject)
-{
-	return WddmHookFindAdapter(PhysicalDeviceObject, NULL);
-}
-
-PWDDM_ADAPTER WddmHookFindAdapterFromContext(PVOID MiniportDeviceContext)
-{
-	return WddmHookFindAdapter(NULL, MiniportDeviceContext);
-}
-
 
 PWDDM_ADAPTER WddmDriverFindAdapter(
 	PWDDM_DRIVER WddmDriver,
-	PDEVICE_OBJECT PhysicalDeviceObject,
-	PVOID MiniportDeviceContext
+	PWDDM_ADAPTER_FIND_DATA FindData
 )
 {
 	KIRQL OldIrql;
@@ -742,14 +713,25 @@ PWDDM_ADAPTER WddmDriverFindAdapter(
 		wddmAdapter = CONTAINING_RECORD(Entry, WDDM_ADAPTER, List);
 
 		ASSERT(wddmAdapter->Signature == WDDM_ADAPTER_SIGNATURE);
-		if (PhysicalDeviceObject != NULL && 
-			wddmAdapter->PhysicalDeviceObject == PhysicalDeviceObject) 
+
+		if (FindData->Flags & WDDM_HOOK_FIND_FIRST_ADAPTER) {
+			break;
+		}
+
+		if ((FindData->Flags & WDDM_HOOK_FIND_MATCH_PDO) != 0 &&
+			FindData->PhysicalDeviceObject == wddmAdapter->PhysicalDeviceObject)
 		{
 			break;
 		}
 
-		if (MiniportDeviceContext != NULL &&
-			wddmAdapter->MiniportDeviceContext == MiniportDeviceContext)
+		if ((FindData->Flags & WDDM_HOOK_FIND_MATCH_DEVICE_CONTEXT) != 0 &&
+			FindData->MiniportDeviceContext == wddmAdapter->MiniportDeviceContext)
+		{
+			break;
+		}
+
+		if ((FindData->Flags & WDDM_HOOK_FIND_MATCH_DEVICE_HANDLE) != 0 &&
+			FindData->DeviceHandle == wddmAdapter->DxgkInterface.DeviceHandle)
 		{
 			break;
 		}
@@ -762,4 +744,72 @@ PWDDM_ADAPTER WddmDriverFindAdapter(
 
 	return wddmAdapter;
 }
+
+PWDDM_ADAPTER WddmHookFindAdapter(PWDDM_ADAPTER_FIND_DATA FindData)
+{
+	KIRQL OldIrql;
+	PLIST_ENTRY Entry;
+	PWDDM_DRIVER wddmDriver = NULL;
+	PWDDM_ADAPTER wddmAdapter = NULL;
+
+	KeAcquireSpinLock(&Global.Lock, &OldIrql);
+
+	Entry = Global.HookDriverList.Flink;
+	while (Entry != &Global.HookDriverList) {
+		wddmDriver = CONTAINING_RECORD(Entry, WDDM_DRIVER, List);
+
+		ASSERT(wddmDriver->Signature == WDDM_DRIVER_SIGNATURE);
+		
+		wddmAdapter = WddmDriverFindAdapter(wddmDriver, FindData);
+		if (wddmAdapter) {
+			break;
+		}
+
+		Entry = Entry->Flink;
+	}
+
+	KeReleaseSpinLock(&Global.Lock, OldIrql);
+
+	return wddmAdapter;
+}
+
+PWDDM_ADAPTER WddmHookFindFirstAdapter()
+{
+	WDDM_ADAPTER_FIND_DATA findData = {
+		.Flags = WDDM_HOOK_FIND_FIRST_ADAPTER,
+	};
+
+	return WddmHookFindAdapter(&findData);
+}
+
+PWDDM_ADAPTER WddmHookFindAdapterFromPdo(PDEVICE_OBJECT PhysicalDeviceObject)
+{
+	WDDM_ADAPTER_FIND_DATA findData = {
+		.Flags = WDDM_HOOK_FIND_MATCH_PDO,
+		.PhysicalDeviceObject = PhysicalDeviceObject
+	};
+
+	return WddmHookFindAdapter(&findData);
+}
+
+PWDDM_ADAPTER WddmHookFindAdapterFromContext(PVOID MiniportDeviceContext)
+{
+	WDDM_ADAPTER_FIND_DATA findData = {
+		.Flags = WDDM_HOOK_FIND_MATCH_DEVICE_CONTEXT,
+		.MiniportDeviceContext = MiniportDeviceContext
+	};
+
+	return WddmHookFindAdapter(&findData);
+}
+
+PWDDM_ADAPTER WddmHookFindAdapterFromDeviceHandle(HANDLE DeviceHandle)
+{
+	WDDM_ADAPTER_FIND_DATA findData = {
+		.Flags = WDDM_HOOK_FIND_MATCH_DEVICE_HANDLE,
+		.DeviceHandle = DeviceHandle
+	};
+	
+	return WddmHookFindAdapter(&findData);
+}
+
 

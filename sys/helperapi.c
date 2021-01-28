@@ -700,6 +700,37 @@ Cleanup:
 	VidPnInterface->pfnReleaseTargetModeSet(hVidPn, hTargetModeSet);
 }
 
+const char* D3DKMDT_VIDPN_PRESENT_PATH_CONTENT_Name(D3DKMDT_VIDPN_PRESENT_PATH_CONTENT content)
+{
+	switch (content) {
+	case D3DKMDT_VPPC_UNINITIALIZED: return "Uninitialized";
+	case D3DKMDT_VPPC_GRAPHICS     : return "Graphics";
+	case D3DKMDT_VPPC_VIDEO        : return "Video";
+	case D3DKMDT_VPPC_NOTSPECIFIED : return "NotSpecified";
+	default                        : return "<unknown>";
+	}
+}
+
+const char* D3DDDI_GAMMARAMP_TYPE_Name(D3DDDI_GAMMARAMP_TYPE type)
+{
+	switch (type) {
+	case D3DDDI_GAMMARAMP_UNINITIALIZED: return "Uninitialized";
+	case D3DDDI_GAMMARAMP_DEFAULT      : return "Default";
+	case D3DDDI_GAMMARAMP_RGB256x3x16  : return "RGB256x3x16";
+	case D3DDDI_GAMMARAMP_DXGI_1       : return "DXGI_1";
+	case D3DDDI_GAMMARAMP_MATRIX_3x4   : return "Matrix_3x4";
+	case D3DDDI_GAMMARAMP_MATRIX_V2    : return "Matrix_v2";
+	default                            : return "<unknown>";
+	}
+}
+
+void Dump_D3DKMDT_GAMMA_RAMP(const D3DKMDT_GAMMA_RAMP* GammaRamp)
+{
+	pr_info("D3DKMDT_GAMMA_RAMP {\n");
+	pr_info("    Type: %s\n", D3DDDI_GAMMARAMP_TYPE_Name(GammaRamp->Type));
+	pr_info("    DataSize: %d\n", GammaRamp->DataSize);
+	pr_info("}");
+}
 
 
 void Dump_VidPnPath(
@@ -757,6 +788,16 @@ void Dump_VidPnPath(
 			vidPnPathInfo->VisibleFromActiveBROffset.cy);
 		pr_info("    VidPnTargetColorBasis: %s\n",
 			D3DKMDT_COLOR_BASIS_Name(vidPnPathInfo->VidPnTargetColorBasis));
+		pr_info("    VidPnTargetColorCoeffDynamicRanges {\n");
+		pr_info("        FirstChannel: %d\n", vidPnPathInfo->VidPnTargetColorCoeffDynamicRanges.FirstChannel);
+		pr_info("        SecondChannel: %d\n", vidPnPathInfo->VidPnTargetColorCoeffDynamicRanges.SecondChannel);
+		pr_info("        ThirdChannel: %d\n", vidPnPathInfo->VidPnTargetColorCoeffDynamicRanges.ThirdChannel);
+		pr_info("        FourthChannel: %d\n", vidPnPathInfo->VidPnTargetColorCoeffDynamicRanges.FourthChannel);
+		pr_info("    }");
+		pr_info("    Content: %s\n", D3DKMDT_VIDPN_PRESENT_PATH_CONTENT_Name(vidPnPathInfo->Content));
+		TraceIndent();
+		Dump_D3DKMDT_GAMMA_RAMP(&vidPnPathInfo->GammaRamp);
+		TraceUnindent();
 		pr_info("}\n");
 
 		if (Global.fDumpSourceModeSet) {
@@ -895,10 +936,10 @@ void Dump_DXGKARG_RECOMMENDMONITORMODES(
 		pr_info("            ActiveSize: %d-%d\n",
 			monitorMode->VideoSignalInfo.ActiveSize.cx,
 			monitorMode->VideoSignalInfo.ActiveSize.cy);
-		pr_info("            VSyncFreq: %d-%d\n",
+		pr_info("            VSyncFreq: %d/%d\n",
 			monitorMode->VideoSignalInfo.VSyncFreq.Numerator,
 			monitorMode->VideoSignalInfo.VSyncFreq.Denominator);
-		pr_info("            HSyncFreq: %d-%d\n",
+		pr_info("            HSyncFreq: %d/%d\n",
 			monitorMode->VideoSignalInfo.HSyncFreq.Numerator,
 			monitorMode->VideoSignalInfo.HSyncFreq.Denominator);
 		pr_info("            PixelRate: %d\n", 
@@ -922,4 +963,40 @@ void Dump_DXGKARG_RECOMMENDMONITORMODES(
 	}
 
 	pr_info("}\n");
+}
+
+const char* D3DKMDT_MONITOR_CONNECTIVITY_CHECKS_Name(D3DKMDT_MONITOR_CONNECTIVITY_CHECKS v)
+{
+	switch (v) {
+	case D3DKMDT_MCC_UNINITIALIZED: return "Uninitialized";
+	case D3DKMDT_MCC_IGNORE: return "Ignore";
+	case D3DKMDT_MCC_ENFORCE: return "Enforce";
+	default: return "<unknown>";
+	}
+}
+
+const char* DXGKARG_COMMITVIDPN_FLAGS_Name(DXGKARG_COMMITVIDPN_FLAGS flags)
+{
+	if (flags.PathPowerTransition && flags.PathPoweredOff)
+		return "PowerTransition | PoweredOff";
+	if (flags.PathPowerTransition)
+		return "PowerTransition";
+	if (flags.PathPoweredOff)
+		return "PoweredOff";
+	return "<empty>";
+}
+
+
+void Dump_DXGKARG_COMMITVIDPN(PWDDM_ADAPTER WddmAdapter, const DXGKARG_COMMITVIDPN* CommitVidPn)
+{
+	pr_info("DXGKARG_COMMITVIDPN {\n");
+	TraceIndent();
+	pr_info("hFunctionalVidPn\n");
+	Dump_VidPn(WddmAdapter, CommitVidPn->hFunctionalVidPn);
+	pr_info("AffectedVidPnSourceId: %d\n", CommitVidPn->AffectedVidPnSourceId);
+	pr_info("MonitorConnectivityChecks: %s\n", D3DKMDT_MONITOR_CONNECTIVITY_CHECKS_Name(CommitVidPn->MonitorConnectivityChecks));
+	pr_info("hPrimaryAllocation: 0x%p\n", CommitVidPn->hPrimaryAllocation);
+	pr_info("Flags: %s\n", DXGKARG_COMMITVIDPN_FLAGS_Name(CommitVidPn->Flags));
+	TraceUnindent();
+	pr_info("}");
 }

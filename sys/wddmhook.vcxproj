@@ -154,6 +154,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dlpapi.c" />
+    <ClCompile Include="DxgkCb.c" />
     <ClCompile Include="filter.c" />
     <ClCompile Include="helperapi.c" />
     <ClCompile Include="ioctl.c" />
@@ -164,6 +165,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="dlpapi.h" />
+    <ClInclude Include="DxgkCb.h" />
     <ClInclude Include="filter.h" />
     <ClInclude Include="helperapi.h" />
     <ClInclude Include="ioctl.h" />

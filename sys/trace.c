@@ -5,6 +5,50 @@
 #include <Dispmprt.h>
 #include <ntstrsafe.h>
 
+#ifndef MIN
+#define MIN(x, y)	((x) < (y) ? (x) : (y))
+#endif 
+
+#ifndef MAX
+#define MAX(x, y)	((x) > (y) ? (x) : (y))
+#endif 
+
+#define MAX_INDENT_LEVEL	5
+
+static int IndentLevel = 0;
+static CHAR szIndentString[MAX_INDENT_LEVEL * 4 + 1] = { 0 };
+
+int DebugLevel = DEFAULT_LOG_LEVEL;
+
+void TraceIndent()
+{
+	IndentLevel = MIN(IndentLevel + 1, MAX_INDENT_LEVEL);
+	memset(szIndentString, ' ', IndentLevel * 4);
+	szIndentString[IndentLevel * 4] = '\0';
+}
+
+void TraceUnindent()
+{
+	IndentLevel = MAX(IndentLevel - 1, 0);
+	memset(szIndentString, ' ', IndentLevel * 4);
+	szIndentString[IndentLevel * 4] = '\0';
+}
+
+void TraceOutput(int level, const char* fmt, ...)
+{
+	char buf[512];
+	va_list argptr;
+
+	if (level > DebugLevel)
+		return;
+
+	va_start(argptr, fmt);
+	RtlStringCchVPrintfA(buf, sizeof(buf), fmt, argptr);
+
+	DbgPrint("%s%s", szIndentString, buf);
+}
+
+
 void TraceDump(const void* buf, unsigned int buflen, const char* prefix)
 {
 	static char HEX[] = "0123456789ABCDEF";
@@ -13,12 +57,12 @@ void TraceDump(const void* buf, unsigned int buflen, const char* prefix)
 	char str[200] = { 0 };
 	unsigned int len;
 
-	Trace(LEVEL_INFO, "%s (length = %d):\n", prefix, buflen);
+	TraceOutput(LEVEL_INFO, "%s (length = %d):\n", prefix, buflen);
 
 	for (i = 0; i < buflen; ++i) {
 		if ((i % 16) == 0) {
 			if (i > 0) {
-				Trace(LEVEL_INFO, "%s\n", str);
+				TraceOutput(LEVEL_INFO, "%s\n", str);
 			}
 			RtlZeroMemory(str, sizeof(str));
 		}
@@ -29,7 +73,7 @@ void TraceDump(const void* buf, unsigned int buflen, const char* prefix)
 	}
 
 	if (strlen(str)) {
-		Trace(LEVEL_INFO, "%s\n", str);
+		TraceOutput(LEVEL_INFO, "%s\n", str);
 	}
 }
 

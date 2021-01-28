@@ -684,7 +684,7 @@ NTSTATUS Win10DpiInitialize(
 
 	status = wf->dxgkrnl_dpiInit(DriverObject, RegistryPath, DriverInitData);
 
-	if (NT_SUCCESS(status)) {
+	if (NT_SUCCESS(status) && Global.fHookEnabled) {
 		wddmDriver->OrigAddDevice = DriverObject->DriverExtension->AddDevice;
 		DriverObject->DriverExtension->AddDevice = Win10MyAddDevice;
 	}

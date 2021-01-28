@@ -69,7 +69,10 @@ typedef struct _WDDM_ADAPTER
 
 	PDEVICE_OBJECT PhysicalDeviceObject;
 	PVOID MiniportDeviceContext;
+	
 	DXGKRNL_INTERFACE DxgkInterface;
+	DXGKRNL_INTERFACE HookedDxgkInterface;
+
 	ULONG NumberOfVideoPresentSources;
 	ULONG NumberOfChildren;
 
@@ -150,13 +153,28 @@ PWDDM_DRIVER WddmDriverAlloc(PDRIVER_OBJECT DriverObject);
 PWDDM_ADAPTER WddmAdapterAlloc(PWDDM_DRIVER WddmDriver);
 
 PWDDM_DRIVER WddmHookFindDriver(PDRIVER_OBJECT DriverObject);
+
+PWDDM_ADAPTER WddmHookFindFirstAdapter();
 PWDDM_ADAPTER WddmHookFindAdapterFromPdo(PDEVICE_OBJECT PhysicalDeviceObject);
 PWDDM_ADAPTER WddmHookFindAdapterFromContext(PVOID MiniportDeviceContext);
-PWDDM_ADAPTER WddmDriverFindAdapter(
-	PWDDM_DRIVER WddmDriver, 
-	PDEVICE_OBJECT PhysicalDeviceObject,
-	PVOID MiniportDeviceContext
-);
+PWDDM_ADAPTER WddmHookFindAdapterFromDeviceHandle(HANDLE DeviceHandle);
+
+#define WDDM_HOOK_FIND_FIRST_ADAPTER		0x00000001
+#define WDDM_HOOK_FIND_MATCH_PDO			0x00000002
+#define WDDM_HOOK_FIND_MATCH_DEVICE_CONTEXT 0x00000004
+#define WDDM_HOOK_FIND_MATCH_DEVICE_HANDLE	0x00000008
+
+typedef struct _WDDM_ADAPTER_FIND_DATA
+{
+	ULONG Flags;
+	
+	PDEVICE_OBJECT PhysicalDeviceObject;
+	PVOID MiniportDeviceContext;
+	HANDLE DeviceHandle;
+
+} WDDM_ADAPTER_FIND_DATA, *PWDDM_ADAPTER_FIND_DATA;
+
+PWDDM_ADAPTER WddmHookFindAdapter(PWDDM_ADAPTER_FIND_DATA FindData);
 
 #define wf (&(Global))
 #define wf_lock()   KeAcquireSpinLock(&wf->spin_lock, &wf->kirql);
