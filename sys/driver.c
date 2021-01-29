@@ -102,6 +102,7 @@ NTSTATUS DriverEntry(
 
 	Global.fCreateHookDevice = FALSE;
 	Global.fHookEnabled = FALSE;
+	Global.fModifyConstrainingVidPn = FALSE;
 
 	KeInitializeSpinLock(&Global.Lock);
 	InitializeListHead(&Global.HookDriverList);

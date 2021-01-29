@@ -51,7 +51,7 @@ PDXGKRNL_INTERFACE Filter_SetupDxgkInterfaceHook(
 
 	DxgkInterface = &wddmAdapter->HookedDxgkInterface;
 
-	DxgkInterface->DxgkCbQueryVidPnInterface = Filter_DxgkCbQueryVidPnInterface;
+	// DxgkInterface->DxgkCbQueryVidPnInterface = Filter_DxgkCbQueryVidPnInterface;
 
 	return DxgkInterface;
 }

@@ -107,29 +107,30 @@ void Dump_DXGK_CHILD_DESCRIPTOR(
 	DWORD i;
 	for (i = 0; i < n; ++i, ++ChildDescriptor) {
 		pr_info("DXGK_CHILD_DESCRIPTOR[%d] {\n", i);
-		pr_info("    ChildDeviceType: %s\n", DXGK_CHILD_DEVICE_TYPE_Name(ChildDescriptor->ChildDeviceType));
+		TraceIndent();
+
+		pr_info("ChildDeviceType: %s\n", DXGK_CHILD_DEVICE_TYPE_Name(ChildDescriptor->ChildDeviceType));
 		switch (ChildDescriptor->ChildDeviceType) {
 		case TypeVideoOutput:
-			pr_info(
-				"    ChildCapabilities {\n"
-				"        InterfaceTechnology(%s)\n"
-				"        MonitorOrientationAwareness(%s)\n"
-			    "        SupportsSdtvModes(%s)\n"
-				"    }\n",
-				D3DKMDT_VIDEO_OUTPUT_TECHNOLOGY_Name(ChildDescriptor->ChildCapabilities.Type.VideoOutput.InterfaceTechnology),
-				D3DKMDT_MONITOR_ORIENTATION_AWARENESS_Name(ChildDescriptor->ChildCapabilities.Type.VideoOutput.MonitorOrientationAwareness),
-				ChildDescriptor->ChildCapabilities.Type.VideoOutput.SupportsSdtvModes ? "True" : "False"
-				);
+			pr_info("ChildCapabilities {\n");
+			TraceIndent();
+			pr_info("InterfaceTechnology(%s)\n", D3DKMDT_VIDEO_OUTPUT_TECHNOLOGY_Name(ChildDescriptor->ChildCapabilities.Type.VideoOutput.InterfaceTechnology));
+			pr_info("MonitorOrientationAwareness(%s)\n", D3DKMDT_MONITOR_ORIENTATION_AWARENESS_Name(ChildDescriptor->ChildCapabilities.Type.VideoOutput.MonitorOrientationAwareness));
+			pr_info("SupportsSdtvModes(%s)\n", ChildDescriptor->ChildCapabilities.Type.VideoOutput.SupportsSdtvModes ? "True" : "False");
+			TraceUnindent();
+			pr_info("}\n");
 			break;
 		case TypeOther:
-			pr_info("    ChildCapabilities { MustBeZero(%d) }\n",
+			pr_info("ChildCapabilities { MustBeZero(%d) }\n",
 				ChildDescriptor->ChildCapabilities.Type.Other.MustBeZero);
 			break;
 		default:
 			break;
 		}
-		pr_info("    AcpiUid: %d\n", ChildDescriptor->AcpiUid);
-		pr_info("    ChildUid: %d\n", ChildDescriptor->ChildUid);
+		pr_info("AcpiUid: %d\n", ChildDescriptor->AcpiUid);
+		pr_info("ChildUid: %d\n", ChildDescriptor->ChildUid);
+		
+		TraceUnindent();
 		pr_info("}\n");
 	}
 }
@@ -508,7 +509,7 @@ void Dump_SourceModeSet(
 		if (index < Global.nMaxSourceModeSetDump) {
 			Dump_D3DKMDT_VIDPN_SOURCE_MODE(sourceMode, index, NULL);
 		}
-			
+		
 		++index;
 
 		status = sourceModeSetInterface->pfnAcquireNextModeInfo(
@@ -999,4 +1000,82 @@ void Dump_DXGKARG_COMMITVIDPN(PWDDM_ADAPTER WddmAdapter, const DXGKARG_COMMITVID
 	pr_info("Flags: %s\n", DXGKARG_COMMITVIDPN_FLAGS_Name(CommitVidPn->Flags));
 	TraceUnindent();
 	pr_info("}");
+}
+
+// copy from d3dkddi.h
+//
+typedef enum _DXGK_CONNECTION_STATUS 
+{
+	ConnectionStatusUninitialized = 0,
+
+	TargetStatusDisconnected = 4,
+	TargetStatusConnected,
+	TargetStatusJoined,
+
+	MonitorStatusDisconnected = 8,
+	MonitorStatusUnknown,
+	MonitorStatusConnected,
+
+	LinkConfigurationStarted = 12,
+	LinkConfigurationFailed,
+	LinkConfigurationSucceeded,
+} DXGK_CONNECTION_STATUS, * PDXGK_CONNECTION_STATUS;
+
+
+const char* DXGK_CONNECTION_STATUS_Name(DXGK_CONNECTION_STATUS status)
+{
+	switch (status) {
+	case ConnectionStatusUninitialized: return "Uninitialized";
+	case TargetStatusDisconnected     : return "Target-Disconnected";
+	case TargetStatusConnected        : return "Target-Connected";
+	case TargetStatusJoined           : return "Target-Joined";
+	case MonitorStatusDisconnected    : return "Monitor-Disconnected";
+	case MonitorStatusUnknown         : return "Monitor-Unknown";
+	case MonitorStatusConnected       : return "Monitor-Connected";
+	case LinkConfigurationStarted     : return "LinkConfig-Started";
+	case LinkConfigurationFailed      : return "LinkConfig-Failed";
+	case LinkConfigurationSucceeded   : return "LinkConfig-Succeeded";
+	default                           : return "<unknown>";
+	}
+}
+
+
+void Dump_DXGK_CONNECTION_CHANGE(const DXGK_CONNECTION_CHANGE* ConnectionChange)
+{
+	pr_info("DXGK_CONNECTION_CHANGE {\n");
+	TraceIndent();
+	pr_info("ConnectionChangeId: %I64d\n", ConnectionChange->ConnectionChangeId);
+	pr_info("TargetId: %d\n", ConnectionChange->TargetId);
+	pr_info("ConnectionStatus: %s\n", DXGK_CONNECTION_STATUS_Name(ConnectionChange->ConnectionStatus));
+	switch (ConnectionChange->ConnectionStatus) {
+	case TargetStatusJoined:
+		pr_info("TargetJoin::BaseTargetType: %s\n", D3DKMDT_VIDEO_OUTPUT_TECHNOLOGY_Name(ConnectionChange->TargetJoin.BaseTargetType));
+		pr_info("TargetJoin::NewTargetId: %d\n", ConnectionChange->TargetJoin.NewTargetId);
+		break;
+
+	case TargetStatusConnected:
+		pr_info("TargetConnect::BaseTargetType: %s\n", D3DKMDT_VIDEO_OUTPUT_TECHNOLOGY_Name(ConnectionChange->TargetConnect.BaseTargetType));
+		pr_info("TargetConnect::NewTargetId: %d\n", ConnectionChange->TargetConnect.NewTargetId);
+		break;
+
+	case MonitorStatusConnected:
+		pr_info("MonitorConnect::LinkTargetType: %s\n", D3DKMDT_VIDEO_OUTPUT_TECHNOLOGY_Name(ConnectionChange->MonitorConnect.LinkTargetType));
+		break;
+
+	default:
+		break;
+	}
+	TraceUnindent();
+	pr_info("}\n");
+}
+
+void Dump_DXGKARG_QUERYCONNECTIONCHANGE(PWDDM_ADAPTER WddmAdapter, const DXGKARG_QUERYCONNECTIONCHANGE* QueryConnectionChange)
+{
+	UNREFERENCED_PARAMETER(WddmAdapter);
+
+	pr_info("DXGKARG_QUERYCONNECTIONCHANGE {\n");
+	TraceIndent();
+	Dump_DXGK_CONNECTION_CHANGE(&QueryConnectionChange->ConnectionChange);
+	TraceUnindent();
+	pr_info("}\n");
 }

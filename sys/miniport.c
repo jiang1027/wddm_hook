@@ -599,6 +599,7 @@ void SetHookDriverInitData(DRIVER_INITIALIZATION_DATA* DriverInitData)
 	REPLACE_CALLBACK(DxgkDdiSetVidPnSourceVisibility);
 	REPLACE_CALLBACK(DxgkDdiCommitVidPn);
 	REPLACE_CALLBACK(DxgkDdiRecommendMonitorModes);
+	REPLACE_CALLBACK(DxgkDdiQueryConnectionChange);
 }
 
 NTSTATUS Win10MyAddDevice(

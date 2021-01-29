@@ -5,6 +5,11 @@
 #include "helperapi.h"
 #include "DxgkCb.h"
 
+NTSTATUS Filter_HackConstainingVidPn(
+	PWDDM_ADAPTER wddmAdapter,
+	IN_CONST_PDXGKARG_ENUMVIDPNCOFUNCMODALITY_CONST pEnumCofuncModality
+);
+
 WDDM_HOOK_GLOBAL Global;
 
 #define DEV_NAME L"\\Device\\WddmFilterCtrlDevice"
@@ -479,6 +484,10 @@ Filter_DxgkDdiEnumVidPnCofuncModality(
 	);
 
 	if (NT_SUCCESS(status)) {
+		if (Global.fModifyConstrainingVidPn) {
+			status = Filter_HackConstainingVidPn(wddmAdapter, pEnumCofuncModality);
+		}
+
 		pr_info("result constraining VidPn\n");
 		Dump_DXGKARG_ENUMVIDPNCOFUNCMODALITY(wddmAdapter, pEnumCofuncModality);
 	}
@@ -627,6 +636,36 @@ Filter_DxgkDdiRecommendMonitorModes(
 	return status;
 }
 
+NTSTATUS
+APIENTRY
+Filter_DxgkDdiQueryConnectionChange(
+	IN_CONST_HANDLE                         hAdapter,
+	IN_PDXGKARG_QUERYCONNECTIONCHANGE       pQueryConnectionChange
+)
+{
+	PWDDM_ADAPTER wddmAdapter;
+	DRIVER_INITIALIZATION_DATA* DriverInitData;
+	NTSTATUS status;
+
+	wddmAdapter = WddmHookFindAdapterFromContext(hAdapter);
+	ASSERT(wddmAdapter && wddmAdapter->Signature == WDDM_ADAPTER_SIGNATURE);
+	ASSERT(wddmAdapter->WddmDriver);
+
+	DriverInitData = &wddmAdapter->WddmDriver->DriverInitData;
+	ASSERT(DriverInitData->DxgkDdiQueryConnectionChange);
+
+	pr_debug("-> Filter_DxgkDdiQueryconnectionchange()\n");
+
+	status = DriverInitData->DxgkDdiQueryConnectionChange(hAdapter, pQueryConnectionChange);
+	
+	if (status == STATUS_SUCCESS) {
+		Dump_DXGKARG_QUERYCONNECTIONCHANGE(wddmAdapter, pQueryConnectionChange);
+	}
+
+	pr_debug("<- Filter_DxgkDdiQueryConnectionChange(), status(0x%08x)\n", status);
+
+	return status;
+}
 
 PWDDM_DRIVER WddmDriverAlloc(PDRIVER_OBJECT DriverObject)
 {
@@ -812,4 +851,202 @@ PWDDM_ADAPTER WddmHookFindAdapterFromDeviceHandle(HANDLE DeviceHandle)
 	return WddmHookFindAdapter(&findData);
 }
 
+NTSTATUS Filter_VidPnHasPinnedSource(
+	D3DKMDT_HVIDPN hVidPn,
+	const DXGK_VIDPN_INTERFACE* VidPnInterface,
+	D3DKMDT_VIDEO_PRESENT_SOURCE_MODE_ID SourceId
+)
+{
+	// Get the source mode set for this SourceId
+	D3DKMDT_HVIDPNSOURCEMODESET hSourceModeSet;
+	const DXGK_VIDPNSOURCEMODESET_INTERFACE* sourceModeSetInterface;
+	const D3DKMDT_VIDPN_SOURCE_MODE* pinnedSourceMode = NULL;
 
+	NTSTATUS status = VidPnInterface->pfnAcquireSourceModeSet(
+		hVidPn,
+		SourceId,
+		&hSourceModeSet,
+		&sourceModeSetInterface
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("pfnAcquireSourceModeSet() failed, status(0x%08x)\n", status);
+		return status;
+	}
+
+	status = sourceModeSetInterface->pfnAcquirePinnedModeInfo(
+		hSourceModeSet, &pinnedSourceMode
+	);
+	if (status != STATUS_SUCCESS) {
+		status = STATUS_NOT_FOUND;
+		goto Cleanup;
+	}
+
+	sourceModeSetInterface->pfnReleaseModeInfo(hSourceModeSet, pinnedSourceMode);
+
+Cleanup:
+	return status;
+}
+
+NTSTATUS Filter_CreateNewSourceModeSet(
+	D3DKMDT_HVIDPN hVidPn,
+	const DXGK_VIDPN_INTERFACE* VidPnInterface,
+	D3DKMDT_VIDEO_PRESENT_SOURCE_MODE_ID SourceId
+)
+{
+	NTSTATUS status;
+	D3DKMDT_HVIDPNSOURCEMODESET hSourceModeSet = NULL;
+	const DXGK_VIDPNSOURCEMODESET_INTERFACE* sourceModeSetInterface = NULL;
+	D3DKMDT_VIDPN_SOURCE_MODE* sourceMode = NULL;
+
+	status = VidPnInterface->pfnCreateNewSourceModeSet(
+		hVidPn,
+		SourceId,
+		&hSourceModeSet,
+		&sourceModeSetInterface
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("create new source mode set failed, status(0x%08x)\n", status);
+		goto Cleanup;
+	}
+
+	// create new source mode and add it to the source mode set
+	//
+	
+	status = sourceModeSetInterface->pfnCreateNewModeInfo(
+		hSourceModeSet, &sourceMode
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("create new source mode failed, status(0x%08x)\n", status);
+		goto Cleanup;
+	}
+
+	sourceMode->Type = D3DKMDT_RMT_GRAPHICS;
+	sourceMode->Format.Graphics.PrimSurfSize.cx = 1024;
+	sourceMode->Format.Graphics.PrimSurfSize.cy = 768;
+	sourceMode->Format.Graphics.VisibleRegionSize.cx = 1024;
+	sourceMode->Format.Graphics.VisibleRegionSize.cy = 768;
+	sourceMode->Format.Graphics.Stride = 0x1000;
+	sourceMode->Format.Graphics.PixelFormat = D3DDDIFMT_A8R8G8B8;
+	sourceMode->Format.Graphics.ColorBasis = D3DKMDT_CB_SRGB;
+	sourceMode->Format.Graphics.PixelValueAccessMode = D3DKMDT_PVAM_DIRECT;
+
+	status = sourceModeSetInterface->pfnAddMode(hSourceModeSet, sourceMode);
+	if (status != STATUS_SUCCESS) {
+		pr_err("add source mode failed, status(0x%08x)\n", status);
+		goto Cleanup;
+	}
+
+	// the added source mode is managed by source mode set
+	// 
+	sourceMode = NULL;
+
+	// replace the original source mode set 
+	//
+	status = VidPnInterface->pfnAssignSourceModeSet(
+		hVidPn,
+		SourceId,
+		hSourceModeSet
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("assign source mode set to source(%d) failed, status(0x%08x)\n",
+			SourceId, status);
+		goto Cleanup;
+	}
+
+	// the source mode set is managed by VidPn
+	//
+	hSourceModeSet = NULL;
+
+Cleanup:
+	if (sourceMode) {
+		sourceModeSetInterface->pfnReleaseModeInfo(hSourceModeSet, sourceMode);
+	}
+
+	if (hSourceModeSet) {
+		VidPnInterface->pfnReleaseSourceModeSet(hVidPn, hSourceModeSet);
+	}
+
+	return status;
+}
+
+NTSTATUS Filter_HackConstainingVidPn(
+	PWDDM_ADAPTER wddmAdapter,
+	IN_CONST_PDXGKARG_ENUMVIDPNCOFUNCMODALITY_CONST pEnumCofuncModality
+)
+{
+	NTSTATUS status;
+	const DXGK_VIDPN_INTERFACE* VidPnInterface;
+	D3DKMDT_HVIDPNTOPOLOGY hVidPnTopology = NULL;
+	const DXGK_VIDPNTOPOLOGY_INTERFACE* topologyInterface = NULL;
+	const D3DKMDT_VIDPN_PRESENT_PATH* path = NULL;
+	const D3DKMDT_VIDPN_PRESENT_PATH* nextPath = NULL;
+
+	ASSERT(wddmAdapter->DxgkInterface.DxgkCbQueryVidPnInterface);
+
+	status = wddmAdapter->DxgkInterface.DxgkCbQueryVidPnInterface(
+		pEnumCofuncModality->hConstrainingVidPn,
+		DXGK_VIDPN_INTERFACE_VERSION_V1,
+		&VidPnInterface
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("DxgkCbQueryVidPnInterface() failed, status(0x%08x)\n", status);
+		return status;
+	}
+
+	// get topology interface
+	//
+	status = VidPnInterface->pfnGetTopology(
+		pEnumCofuncModality->hConstrainingVidPn,
+		&hVidPnTopology,
+		&topologyInterface
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("pfnGetTopology() failed, status(0x%08x)\n", status);
+		return status;
+	}
+
+	// iterate through each path in topology
+	//
+	status = topologyInterface->pfnAcquireFirstPathInfo(hVidPnTopology, &path);
+	while (status == STATUS_SUCCESS) {
+		
+		if (!((pEnumCofuncModality->EnumPivotType == D3DKMDT_EPT_VIDPNSOURCE) &&
+			  (pEnumCofuncModality->EnumPivot.VidPnSourceId == path->VidPnSourceId)))
+		{
+			status = Filter_VidPnHasPinnedSource(
+				pEnumCofuncModality->hConstrainingVidPn,
+				VidPnInterface,
+				path->VidPnSourceId
+			);
+
+			switch (status) {
+			case STATUS_SUCCESS:
+				break;
+
+			case STATUS_NOT_FOUND:
+				// no pinned source mode found, create new source mode set
+				//
+				status = Filter_CreateNewSourceModeSet(
+					pEnumCofuncModality->hConstrainingVidPn,
+					VidPnInterface,
+					path->VidPnSourceId
+				);
+				break;
+
+			default:
+				break;
+			}
+		}
+		
+		// get next path and release the presented
+		//
+		status = topologyInterface->pfnAcquireNextPathInfo(
+			hVidPnTopology,
+			path,
+			&nextPath
+		);
+		topologyInterface->pfnReleasePathInfo(hVidPnTopology, path);
+	}
+
+	return STATUS_SUCCESS;
+}

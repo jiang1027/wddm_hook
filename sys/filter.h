@@ -141,6 +141,7 @@ typedef struct _WDDM_HOOK_GLOBAL
 
 	BOOLEAN fCreateHookDevice;
 	BOOLEAN fHookEnabled;
+	BOOLEAN fModifyConstrainingVidPn;
 
 	KSPIN_LOCK Lock;
 	LIST_ENTRY HookDriverList;
@@ -228,6 +229,7 @@ DXGKDDI_SETVIDPNSOURCEADDRESS Filter_DxgkDdiSetVidPnSourceAddress;
 DXGKDDI_SETVIDPNSOURCEVISIBILITY Filter_DxgkDdiSetVidPnSourceVisibility;
 DXGKDDI_COMMITVIDPN Filter_DxgkDdiCommitVidPn;
 DXGKDDI_RECOMMENDMONITORMODES Filter_DxgkDdiRecommendMonitorModes;
+DXGKDDI_QUERYCONNECTIONCHANGE Filter_DxgkDdiQueryConnectionChange;
 
 #endif /* FILTER_INC */
 /* end of file */
