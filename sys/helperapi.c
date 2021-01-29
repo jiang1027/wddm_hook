@@ -1002,26 +1002,6 @@ void Dump_DXGKARG_COMMITVIDPN(PWDDM_ADAPTER WddmAdapter, const DXGKARG_COMMITVID
 	pr_info("}");
 }
 
-// copy from d3dkddi.h
-//
-typedef enum _DXGK_CONNECTION_STATUS 
-{
-	ConnectionStatusUninitialized = 0,
-
-	TargetStatusDisconnected = 4,
-	TargetStatusConnected,
-	TargetStatusJoined,
-
-	MonitorStatusDisconnected = 8,
-	MonitorStatusUnknown,
-	MonitorStatusConnected,
-
-	LinkConfigurationStarted = 12,
-	LinkConfigurationFailed,
-	LinkConfigurationSucceeded,
-} DXGK_CONNECTION_STATUS, * PDXGK_CONNECTION_STATUS;
-
-
 const char* DXGK_CONNECTION_STATUS_Name(DXGK_CONNECTION_STATUS status)
 {
 	switch (status) {

@@ -46,6 +46,26 @@ void Dump_DXGKARG_ENUMVIDPNCOFUNCMODALITY(PWDDM_ADAPTER wddmAdapter, const DXGKA
 void Dump_DXGKARG_RECOMMENDMONITORMODES(PWDDM_ADAPTER wddmAdapter, const DXGKARG_RECOMMENDMONITORMODES* const RecommendMonitorModes);
 void Dump_DXGKARG_COMMITVIDPN(PWDDM_ADAPTER WddmAdapter, const DXGKARG_COMMITVIDPN* CommitVidPn);
 
+
+// copy from d3dkddi.h
+//
+typedef enum _DXGK_CONNECTION_STATUS
+{
+	ConnectionStatusUninitialized = 0,
+
+	TargetStatusDisconnected = 4,
+	TargetStatusConnected,
+	TargetStatusJoined,
+
+	MonitorStatusDisconnected = 8,
+	MonitorStatusUnknown,
+	MonitorStatusConnected,
+
+	LinkConfigurationStarted = 12,
+	LinkConfigurationFailed,
+	LinkConfigurationSucceeded,
+} DXGK_CONNECTION_STATUS, * PDXGK_CONNECTION_STATUS;
+
 void Dump_DXGKARG_QUERYCONNECTIONCHANGE(PWDDM_ADAPTER WddmAdapter, const DXGKARG_QUERYCONNECTIONCHANGE * QueryConnectionChange);
 
 #endif /* HELPERAPI_INC */

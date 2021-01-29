@@ -5,6 +5,13 @@
 #include "helperapi.h"
 #include "DxgkCb.h"
 
+#define WDDM_HOOK_VIRTUAL_HDMI_CHILD_UID 0x11220
+
+NTSTATUS Filter_HandleDesiredVidPn(
+	PWDDM_ADAPTER wddmAdapter,
+	INOUT_PDXGKARG_ISSUPPORTEDVIDPN IsSupportedVidPn
+);
+
 NTSTATUS Filter_HackConstainingVidPn(
 	PWDDM_ADAPTER wddmAdapter,
 	IN_CONST_PDXGKARG_ENUMVIDPNCOFUNCMODALITY_CONST pEnumCofuncModality
@@ -198,13 +205,18 @@ Filter_DxgkDdiStartDevice(
 		wddmAdapter->NumberOfVideoPresentSources = *NumberOfVideoPresentSources;
 		wddmAdapter->NumberOfChildren = *NumberOfChildren;
 
-		if (Global.fChangeNumberOfChildren) {
-			*NumberOfVideoPresentSources = 1;
-			*NumberOfChildren = 1;
-		}
-
 		pr_debug("    NumberOfVideoPresentSources: %d\n", *NumberOfVideoPresentSources);
 		pr_debug("    NumberOfChildren: %d\n", *NumberOfChildren);
+
+		if (Global.fEnumVirtualChild) {
+			*NumberOfChildren = *NumberOfChildren + 1;
+		}
+
+		KeSetTimer(
+			&wddmAdapter->timer,
+			wddmAdapter->timerDueTime,
+			&wddmAdapter->timerDpc
+		);
 	}
 
 	pr_debug("<- Filter_DxgkDdiStartDevice(), status(0x%08x)\n", status);
@@ -230,6 +242,10 @@ Filter_DxgkDdiStopDevice(
 	ASSERT(DriverInitData->DxgkDdiStopDevice);
 
 	pr_debug("-> Filter_DxgkDdiStopDevice()\n");
+
+	if (KeCancelTimer(&wddmAdapter->timer)) {
+		KeFlushQueuedDpcs();
+	}
 
 	status = DriverInitData->DxgkDdiStopDevice(
 		wddmAdapter->MiniportDeviceContext
@@ -286,8 +302,8 @@ Filter_DxgkDdiQueryChildRelations(
 	PWDDM_ADAPTER wddmAdapter;
 	DRIVER_INITIALIZATION_DATA* DriverInitData;
 	NTSTATUS status;
-	PDXGK_CHILD_DESCRIPTOR fullRelations = NULL;
-	ULONG fullRelationsSize;
+	PDXGK_CHILD_DESCRIPTOR origRelations = NULL;
+	ULONG origRelationsSize;
 
 	wddmAdapter = WddmHookFindAdapterFromContext(MiniportDeviceContext);
 	ASSERT(wddmAdapter && wddmAdapter->Signature == WDDM_ADAPTER_SIGNATURE);
@@ -298,42 +314,52 @@ Filter_DxgkDdiQueryChildRelations(
 
 	pr_debug("-> Filter_DxgkDdiQueryChildRelations()\n");
 
-	fullRelationsSize = (wddmAdapter->NumberOfChildren + 1) * sizeof(DXGK_CHILD_DESCRIPTOR);
-	fullRelations = (PDXGK_CHILD_DESCRIPTOR)_ALLOC(NonPagedPool, fullRelationsSize, WDDM_HOOK_MEMORY_TAG);
+	origRelationsSize = (wddmAdapter->NumberOfChildren + 1) * sizeof(DXGK_CHILD_DESCRIPTOR);
+	origRelations = (PDXGK_CHILD_DESCRIPTOR)_ALLOC(NonPagedPool, origRelationsSize, WDDM_HOOK_MEMORY_TAG);
 
-	if (!fullRelations) {
+	if (!origRelations) {
 		pr_err("allocate DXGK_CHILD_DESCRIPTOR failed\n");
 		status = STATUS_INSUFFICIENT_RESOURCES;
 		goto End;
 	}
 
-	RtlZeroMemory(fullRelations, fullRelationsSize);
+	RtlZeroMemory(origRelations, origRelationsSize);
 
 	status = DriverInitData->DxgkDdiQueryChildRelations(
 		wddmAdapter->MiniportDeviceContext,
-		fullRelations,
-		fullRelationsSize
+		origRelations,
+		origRelationsSize
 	);
 
 	if (NT_SUCCESS(status)) {
-		DWORD n = fullRelationsSize / sizeof(DXGK_CHILD_DESCRIPTOR);
+		DWORD n = origRelationsSize / sizeof(DXGK_CHILD_DESCRIPTOR);
 
-		TraceIndent();
-		Dump_DXGK_CHILD_DESCRIPTOR(fullRelations, n);
-		TraceUnindent();
-
-		n = ChildRelationsSize / sizeof(DXGK_CHILD_DESCRIPTOR);
+		// get rid of trailing empty ChildDescriptor
+		n--;
 
 		RtlCopyMemory(
 			ChildRelations,
-			fullRelations,
-			(n - 1) * sizeof(DXGK_CHILD_DESCRIPTOR)
+			origRelations,
+			n * sizeof(DXGK_CHILD_DESCRIPTOR)
 		);
+
+		if (Global.fEnumVirtualChild) {
+			RtlCopyMemory(
+				&ChildRelations[n],
+				&wddmAdapter->VirtualChild.Descriptor,
+				sizeof(DXGK_CHILD_DESCRIPTOR)
+			);
+			n++;
+		}
+
+		TraceIndent();
+		Dump_DXGK_CHILD_DESCRIPTOR(ChildRelations, n);
+		TraceUnindent();
 	}
 
 End:
-	if (fullRelations) {
-		_FREE(fullRelations);
+	if (origRelations) {
+		_FREE(origRelations);
 	}
 
 	pr_debug("<- Filter_DxgkDdiQueryChildRelations(), status(0x%08x)\n", status);
@@ -400,11 +426,16 @@ Filter_DxgkDdiQueryDeviceDescriptor(
 	pr_debug("-> Filter_DxgkDdiQueryDeviceDescriptor(), ChildUid(%d)\n",
 		ChildUid);
 
-	status = DriverInitData->DxgkDdiQueryDeviceDescriptor(
-		wddmAdapter->MiniportDeviceContext,
-		ChildUid,
-		DeviceDescriptor
-	);
+	if (ChildUid == wddmAdapter->VirtualChild.Descriptor.ChildUid) {
+		status = STATUS_MONITOR_NO_DESCRIPTOR;
+	}
+	else {
+		status = DriverInitData->DxgkDdiQueryDeviceDescriptor(
+			wddmAdapter->MiniportDeviceContext,
+			ChildUid,
+			DeviceDescriptor
+		);
+	}
 
 	if (NT_SUCCESS(status)) {
 		Dump_DXGK_DEVICE_DESCRIPTOR(DeviceDescriptor);
@@ -438,10 +469,13 @@ Filter_DxgkDdiIsSupportedVidPn(
 
 	Dump_VidPn(wddmAdapter, pIsSupportedVidPn->hDesiredVidPn);
 
-	status = DriverInitData->DxgkDdiIsSupportedVidPn(
-		wddmAdapter->MiniportDeviceContext,
-		pIsSupportedVidPn
-	);
+	status = Filter_HandleDesiredVidPn(wddmAdapter, pIsSupportedVidPn);
+	if (status == STATUS_NOT_FOUND) {
+		status = DriverInitData->DxgkDdiIsSupportedVidPn(
+			wddmAdapter->MiniportDeviceContext,
+			pIsSupportedVidPn
+		);
+	}
 
 	if (NT_SUCCESS(status)) {
 		pr_info("    IsVidPnSupported: %d\n", pIsSupportedVidPn->IsVidPnSupported);
@@ -645,6 +679,7 @@ Filter_DxgkDdiQueryConnectionChange(
 {
 	PWDDM_ADAPTER wddmAdapter;
 	DRIVER_INITIALIZATION_DATA* DriverInitData;
+	DXGK_CONNECTION_CHANGE* connectionChange;
 	NTSTATUS status;
 
 	wddmAdapter = WddmHookFindAdapterFromContext(hAdapter);
@@ -656,7 +691,20 @@ Filter_DxgkDdiQueryConnectionChange(
 
 	pr_debug("-> Filter_DxgkDdiQueryconnectionchange()\n");
 
-	status = DriverInitData->DxgkDdiQueryConnectionChange(hAdapter, pQueryConnectionChange);
+	if (wddmAdapter->VirtualChild.updatePending) {
+		connectionChange = &pQueryConnectionChange->ConnectionChange;
+		connectionChange->ConnectionChangeId = InterlockedIncrement(&wddmAdapter->VirtualChild.connectionChangeId);
+		connectionChange->TargetId = wddmAdapter->VirtualChild.Descriptor.ChildUid;
+		connectionChange->ConnectionStatus = MonitorStatusConnected;
+		connectionChange->MonitorConnect.LinkTargetType = D3DKMDT_VOT_HDMI;
+
+		wddmAdapter->VirtualChild.updatePending = FALSE;
+
+		status = STATUS_SUCCESS;
+	}
+	else {
+		status = DriverInitData->DxgkDdiQueryConnectionChange(hAdapter, pQueryConnectionChange);
+	}
 	
 	if (status == STATUS_SUCCESS) {
 		Dump_DXGKARG_QUERYCONNECTIONCHANGE(wddmAdapter, pQueryConnectionChange);
@@ -693,6 +741,7 @@ PWDDM_DRIVER WddmDriverAlloc(PDRIVER_OBJECT DriverObject)
 PWDDM_ADAPTER WddmAdapterAlloc(PWDDM_DRIVER WddmDriver)
 {
 	PWDDM_ADAPTER wddmAdapter;
+	DXGK_CHILD_DESCRIPTOR* childDescriptor;
 
 	wddmAdapter = (PWDDM_ADAPTER)_ALLOC(
 		NonPagedPool, sizeof(*wddmAdapter), WDDM_HOOK_MEMORY_TAG
@@ -707,6 +756,25 @@ PWDDM_ADAPTER WddmAdapterAlloc(PWDDM_DRIVER WddmDriver)
 	SIGNATURE_ASSIGN(wddmAdapter->Signature, WDDM_ADAPTER_SIGNATURE);
 	InitializeListHead(&wddmAdapter->List);
 	wddmAdapter->WddmDriver = WddmDriver;
+	
+	KeInitializeTimer(&wddmAdapter->timer);
+	KeInitializeDpc(&wddmAdapter->timerDpc, Win10WddmAdapterTimerRoutine, wddmAdapter);
+	wddmAdapter->timerDueTime.QuadPart = -1 * 10 * 1000 * 1000 * 2; // 2 seconds
+	wddmAdapter->indicateVirtualDisplay = FALSE;
+
+	childDescriptor = &wddmAdapter->VirtualChild.Descriptor;
+
+	// virtual child is a HDMI connector
+	//
+	childDescriptor->ChildDeviceType = TypeVideoOutput;
+	childDescriptor->ChildCapabilities.Type.VideoOutput.InterfaceTechnology = D3DKMDT_VOT_HDMI;
+	childDescriptor->ChildCapabilities.Type.VideoOutput.MonitorOrientationAwareness = D3DKMDT_MOA_NONE;
+	childDescriptor->ChildCapabilities.Type.VideoOutput.SupportsSdtvModes = FALSE;
+	childDescriptor->ChildCapabilities.HpdAwareness = HpdAwarenessNone;
+	childDescriptor->AcpiUid = 0;
+	childDescriptor->ChildUid = WDDM_HOOK_VIRTUAL_HDMI_CHILD_UID;
+
+	wddmAdapter->VirtualChild.updatePending = FALSE;
 
 	return wddmAdapter;
 }
@@ -1049,4 +1117,118 @@ NTSTATUS Filter_HackConstainingVidPn(
 	}
 
 	return STATUS_SUCCESS;
+}
+
+
+VOID
+Win10WddmAdapterTimerRoutine(
+	_In_ struct _KDPC* Dpc,
+	_In_opt_ PVOID DeferredContext,
+	_In_opt_ PVOID SystemArgument1,
+	_In_opt_ PVOID SystemArgument2
+)
+{
+	PWDDM_ADAPTER wddmAdapter = (PWDDM_ADAPTER)DeferredContext;
+	const DXGKRNL_INTERFACE* dxgkInterface;
+	NTSTATUS status;
+
+	ASSERT(wddmAdapter && wddmAdapter->Signature == WDDM_ADAPTER_SIGNATURE);
+
+	UNREFERENCED_PARAMETER(Dpc);
+	UNREFERENCED_PARAMETER(SystemArgument1);
+	UNREFERENCED_PARAMETER(SystemArgument2);
+
+	if (wddmAdapter->indicateVirtualDisplay) {
+		dxgkInterface = &wddmAdapter->DxgkInterface;
+		ASSERT(dxgkInterface->DxgkCbIndicateConnectorChange);
+
+		wddmAdapter->indicateVirtualDisplay = FALSE;
+		wddmAdapter->VirtualChild.updatePending = TRUE;
+
+		status = dxgkInterface->DxgkCbIndicateConnectorChange(
+			dxgkInterface->DeviceHandle
+		);
+
+		pr_info("DxgkCbIndicateConnectorChange() return 0x%08x\n", status);
+	}
+
+	KeSetTimer(
+		&wddmAdapter->timer, 
+		wddmAdapter->timerDueTime, 
+		&wddmAdapter->timerDpc
+	);
+}
+
+
+NTSTATUS Filter_HandleDesiredVidPn(
+	PWDDM_ADAPTER WddmAdapter, 
+	INOUT_PDXGKARG_ISSUPPORTEDVIDPN IsSupportedVidPn
+)
+{
+	PDXGKRNL_INTERFACE dxgkInterface = &WddmAdapter->DxgkInterface;
+	const DXGK_VIDPN_INTERFACE* VidPnInterface = NULL;
+	D3DKMDT_HVIDPNTOPOLOGY hTopology = NULL;
+	DXGK_VIDPNTOPOLOGY_INTERFACE* topologyInterface = NULL;
+	D3DKMDT_VIDPN_PRESENT_PATH* pathInfo = NULL;
+	SIZE_T pathnum = 0;
+	NTSTATUS status;
+
+	if (IsSupportedVidPn->hDesiredVidPn == NULL) {
+		return STATUS_NOT_FOUND;
+	}
+
+	status = dxgkInterface->DxgkCbQueryVidPnInterface(
+		IsSupportedVidPn->hDesiredVidPn, 
+		DXGK_VIDPN_INTERFACE_VERSION_V1, 
+		&VidPnInterface
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("DxgkCbQueryVidPnInterface() for hDesiredVidPn failed, status(0x%08x)\n", status);
+		goto Cleanup;
+	}
+
+	status = VidPnInterface->pfnGetTopology(
+		IsSupportedVidPn->hDesiredVidPn,
+		&hTopology,
+		&topologyInterface
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("get hDesiredVidPn topolgy failed, status(0x%08x)\n", status);
+		goto Cleanup;
+	}
+
+	status = topologyInterface->pfnGetNumPaths(hTopology, &pathnum);
+	if (status != STATUS_SUCCESS) {
+		pr_err("get hDesiredVidPn topology path number failed, status(0x%08x)\n", status);
+		goto Cleanup;
+	}
+
+	pr_info("hDesiredVidPn Path Number: %d\n", pathnum);
+
+	if (pathnum != 1) {
+		status = STATUS_NOT_FOUND;
+		goto Cleanup;
+	}
+
+	status = topologyInterface->pfnAcquireFirstPathInfo(hTopology, &pathInfo);
+	if (status != STATUS_SUCCESS) {
+		pr_err("acquire hDesiredVidPn first path failed, status(0x%08x)\n", status);
+		goto Cleanup;
+	}
+
+	if (pathInfo->VidPnTargetId != WddmAdapter->VirtualChild.Descriptor.ChildUid) {
+		status = STATUS_NOT_FOUND;
+		goto Cleanup;
+	}
+
+	IsSupportedVidPn->IsVidPnSupported = TRUE;
+	status = STATUS_SUCCESS;
+
+Cleanup:
+	if (pathInfo != NULL) {
+		ASSERT(topologyInterface);
+		topologyInterface->pfnReleasePathInfo(hTopology, pathInfo);
+	}
+
+	return status;
 }

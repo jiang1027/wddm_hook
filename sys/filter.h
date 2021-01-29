@@ -76,6 +76,18 @@ typedef struct _WDDM_ADAPTER
 	ULONG NumberOfVideoPresentSources;
 	ULONG NumberOfChildren;
 
+	KTIMER timer;
+	KDPC timerDpc;
+	LARGE_INTEGER timerDueTime;
+
+	BOOLEAN indicateVirtualDisplay;
+	
+	struct {
+		BOOLEAN updatePending;
+		LONG connectionChangeId;
+		DXGK_CHILD_DESCRIPTOR Descriptor;
+	} VirtualChild;
+
 } WDDM_ADAPTER, *PWDDM_ADAPTER;
 
 
@@ -118,7 +130,7 @@ typedef struct _WDDM_HOOK_GLOBAL
 	LIST_ENTRY              vidpn_if_head;
 	LIST_ENTRY              topology_if_head;
 
-	BOOLEAN fChangeNumberOfChildren;
+	BOOLEAN fEnumVirtualChild;
 
 	BOOLEAN fDumpSourceModeSet;
 	BOOLEAN fDumpPinnedSourceMode;
@@ -230,6 +242,8 @@ DXGKDDI_SETVIDPNSOURCEVISIBILITY Filter_DxgkDdiSetVidPnSourceVisibility;
 DXGKDDI_COMMITVIDPN Filter_DxgkDdiCommitVidPn;
 DXGKDDI_RECOMMENDMONITORMODES Filter_DxgkDdiRecommendMonitorModes;
 DXGKDDI_QUERYCONNECTIONCHANGE Filter_DxgkDdiQueryConnectionChange;
+
+KDEFERRED_ROUTINE Win10WddmAdapterTimerRoutine;
 
 #endif /* FILTER_INC */
 /* end of file */

@@ -86,7 +86,7 @@ NTSTATUS DriverEntry(
 	InitializeListHead(&Global.vidpn_if_head);
 	InitializeListHead(&Global.topology_if_head);
 
-	Global.fChangeNumberOfChildren = FALSE;
+	Global.fEnumVirtualChild = FALSE;
 
 	Global.fDumpSourceModeSet = TRUE;
 	Global.fDumpPinnedSourceMode = TRUE;
