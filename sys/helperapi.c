@@ -483,14 +483,6 @@ void Dump_SourceModeSet(
 	if (num == 0)
 		goto Cleanup;
 
-	status = sourceModeSetInterface->pfnAcquireFirstModeInfo(
-		hSourceModeSet, &sourceMode
-	);
-	if (status != STATUS_SUCCESS) {
-		pr_err("pfnAcquireFirstModeInfo() failed, status(0x%08x)\n", status);
-		goto Cleanup;
-	}
-
 	if (Global.fDumpPinnedSourceMode) {
 		status = sourceModeSetInterface->pfnAcquirePinnedModeInfo(
 			hSourceModeSet, &pinnedMode
@@ -500,6 +492,15 @@ void Dump_SourceModeSet(
 
 			Dump_D3DKMDT_VIDPN_SOURCE_MODE(pinnedMode, 0, "<Pinned>");
 		}
+		status = STATUS_SUCCESS;
+	}
+
+	status = sourceModeSetInterface->pfnAcquireFirstModeInfo(
+		hSourceModeSet, &sourceMode
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("pfnAcquireFirstModeInfo() failed, status(0x%08x)\n", status);
+		goto Cleanup;
 	}
 
 	while (status == STATUS_SUCCESS)
@@ -1059,3 +1060,153 @@ void Dump_DXGKARG_QUERYCONNECTIONCHANGE(PWDDM_ADAPTER WddmAdapter, const DXGKARG
 	TraceUnindent();
 	pr_info("}\n");
 }
+
+
+
+NTSTATUS Filter_GetVidPnTopology(
+	PWDDM_ADAPTER WddmAdapter,
+	D3DKMDT_HVIDPN hVidPn,
+	const DXGK_VIDPN_INTERFACE** pVidPnInterface,
+	D3DKMDT_HVIDPNTOPOLOGY* hVidPnTopology,
+	const DXGK_VIDPNTOPOLOGY_INTERFACE** TopologyInterface
+)
+{
+	NTSTATUS status;
+	const DXGK_VIDPN_INTERFACE* VidPnInterface;
+
+	ASSERT(WddmAdapter && WddmAdapter->Signature == WDDM_ADAPTER_SIGNATURE);
+	ASSERT(WddmAdapter->DxgkInterface.DxgkCbQueryVidPnInterface);
+
+	status = WddmAdapter->DxgkInterface.DxgkCbQueryVidPnInterface(
+		hVidPn, 
+		DXGK_VIDPN_INTERFACE_VERSION_V1,
+		&VidPnInterface
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("get VidPn interface failed, status(0x%08x)\n", status);
+		return status;
+	}
+
+	status = VidPnInterface->pfnGetTopology(
+		hVidPn, hVidPnTopology, TopologyInterface
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("get VidPn topology failed, status(0x%08x)\n", status);
+		return status;
+	}
+
+	if (pVidPnInterface) {
+		*pVidPnInterface = VidPnInterface;
+	}
+
+	return status;
+}
+
+
+NTSTATUS Filter_GetVidPnPathDataFromTarget(
+	PWDDM_ADAPTER WddmAdapter,
+	D3DKMDT_HVIDPN hVidPn,
+	const DXGK_VIDPN_INTERFACE* VidPnInterface,
+	PVIDPN_PATH_DATA VidPnPathData
+)
+{
+	NTSTATUS status;
+	D3DKMDT_HVIDPNTOPOLOGY hTopology;
+	const DXGK_VIDPNTOPOLOGY_INTERFACE* topologyInterface;
+
+	VidPnPathData->VidPnPath = NULL;
+	VidPnPathData->VidPnSourceModeSet = NULL;
+	VidPnPathData->VidPnSourceModeSetInterface = NULL;
+	VidPnPathData->VidPnTargetModeSet = NULL;
+	VidPnPathData->VidPnTargetModeSetInterface = NULL;
+
+	status = VidPnInterface->pfnGetTopology(
+		hVidPn, &hTopology, &topologyInterface
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("get topology interface failed, status(0x%08x)\n", status);
+		goto Cleanup;
+	}
+
+	status = topologyInterface->pfnGetPathSourceFromTarget(
+		hTopology, 
+		VidPnPathData->VidPnTargetId, 
+		&VidPnPathData->VidPnSourceId
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("get source from target(%d) failed, status(0x%08x)\n", 
+			VidPnPathData->VidPnTargetId, status);
+		goto Cleanup;
+	}
+
+	status = topologyInterface->pfnAcquirePathInfo(
+		hTopology,
+		VidPnPathData->VidPnSourceId,
+		VidPnPathData->VidPnTargetId,
+		&VidPnPathData->VidPnPath
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("acquire path for source(%d) target(%d) failed, status(0x%08x)\n",
+			VidPnPathData->VidPnSourceId, VidPnPathData->VidPnTargetId, status);
+		goto Cleanup;
+	}
+
+	status = VidPnInterface->pfnAcquireSourceModeSet(
+		hVidPn, 
+		VidPnPathData->VidPnSourceId,
+		&VidPnPathData->VidPnSourceModeSet,
+		&VidPnPathData->VidPnSourceModeSetInterface
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("acquire source mode set failed, source(%d), status(0x%08x)\n",
+			VidPnPathData->VidPnSourceId, status);
+		goto Cleanup;
+	}
+
+	status = VidPnInterface->pfnAcquireTargetModeSet(
+		hVidPn,
+		VidPnPathData->VidPnTargetId,
+		&VidPnPathData->VidPnTargetModeSet,
+		&VidPnPathData->VidPnTargetModeSetInterface
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("acquire target mode set failed, target(%d), status(0x%08x)\n",
+			VidPnPathData->VidPnTargetId, status);
+		goto Cleanup;
+	}
+
+	return STATUS_SUCCESS;
+
+Cleanup:
+	if (VidPnPathData->VidPnPath) {
+		ASSERT(hTopology);
+		ASSERT(topologyInterface);
+
+		topologyInterface->pfnReleasePathInfo(
+			hTopology, 
+			VidPnPathData->VidPnPath
+		);
+		VidPnPathData->VidPnPath = NULL;
+	}
+
+	if (VidPnPathData->VidPnSourceModeSet) {
+		VidPnInterface->pfnReleaseSourceModeSet(
+			hVidPn, 
+			VidPnPathData->VidPnSourceModeSet
+		);
+		VidPnPathData->VidPnSourceModeSet = NULL;
+		VidPnPathData->VidPnSourceModeSetInterface = NULL;
+	}
+
+	if (VidPnPathData->VidPnTargetModeSet) {
+		VidPnInterface->pfnReleaseTargetModeSet(
+			hVidPn,
+			VidPnPathData->VidPnTargetModeSet
+		);
+		VidPnPathData->VidPnTargetModeSet = NULL;
+		VidPnPathData->VidPnTargetModeSetInterface = NULL;
+	}
+
+	return status;
+}
+

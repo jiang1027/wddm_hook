@@ -7,14 +7,56 @@
 
 #define WDDM_HOOK_VIRTUAL_HDMI_CHILD_UID 0x11220
 
+const BYTE SampleEDID[] = {
+	0x00,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x00,
+	0x10,0xAC,0xE6,0xD0,0x55,0x5A,0x4A,0x30,
+	0x24,0x1D,0x01,0x04,0xA5,0x3C,0x22,0x78,
+	0xFB,0x6C,0xE5,0xA5,0x55,0x50,0xA0,0x23,
+	0x0B,0x50,0x54,0x00,0x02,0x00,0xD1,0xC0,
+	0x01,0x01,0x01,0x01,0x01,0x01,0x01,0x01,
+	0x01,0x01,0x01,0x01,0x01,0x01,0x58,0xE3,
+	0x00,0xA0,0xA0,0xA0,0x29,0x50,0x30,0x20,
+	0x35,0x00,0x55,0x50,0x21,0x00,0x00,0x1A,
+	0x00,0x00,0x00,0xFF,0x00,0x37,0x4A,0x51,
+	0x58,0x42,0x59,0x32,0x0A,0x20,0x20,0x20,
+	0x20,0x20,0x00,0x00,0x00,0xFC,0x00,0x53,
+	0x32,0x37,0x31,0x39,0x44,0x47,0x46,0x0A,
+	0x20,0x20,0x20,0x20,0x00,0x00,0x00,0xFD,
+	0x00,0x28,0x9B,0xFA,0xFA,0x40,0x01,0x0A,
+	0x20,0x20,0x20,0x20,0x20,0x20,0x00,0x2C,
+};
+
 NTSTATUS Filter_HandleDesiredVidPn(
 	PWDDM_ADAPTER wddmAdapter,
 	INOUT_PDXGKARG_ISSUPPORTEDVIDPN IsSupportedVidPn
 );
 
-NTSTATUS Filter_HackConstainingVidPn(
-	PWDDM_ADAPTER wddmAdapter,
-	IN_CONST_PDXGKARG_ENUMVIDPNCOFUNCMODALITY_CONST pEnumCofuncModality
+NTSTATUS Filter_UpdateConstrainingVidPn(
+	PWDDM_ADAPTER wddmAdapter, 
+	IN_CONST_PDXGKARG_ENUMVIDPNCOFUNCMODALITY_CONST pEnumCofuncModality, 
+	const DXGK_VIDPN_INTERFACE* VidPnInterface,
+	D3DKMDT_HVIDPNTOPOLOGY hTopology, 
+	const DXGK_VIDPNTOPOLOGY_INTERFACE* TopologyInterface, 
+	const D3DKMDT_VIDPN_PRESENT_PATH* pathInfo
+);
+
+NTSTATUS Filter_HackConstrainingVidPn(
+	PWDDM_ADAPTER wddmAdapter, 
+	IN_CONST_PDXGKARG_ENUMVIDPNCOFUNCMODALITY_CONST EnumCofuncModality
+);
+
+
+NTSTATUS Filter_CreateSourceModeSetForTarget(
+	D3DKMDT_HVIDPN hVidPn,
+	const DXGK_VIDPN_INTERFACE* VidPnInterface,
+	D3DDDI_VIDEO_PRESENT_SOURCE_ID VidPnSourceId,
+	D3DDDI_VIDEO_PRESENT_TARGET_ID VidPnTargetId
+);
+
+NTSTATUS Filter_CreateTargetModeSet(
+	D3DKMDT_HVIDPN hVidPn,
+	const DXGK_VIDPN_INTERFACE* VidPnInterface,
+	D3DDDI_VIDEO_PRESENT_SOURCE_ID VidPnTargetId
 );
 
 WDDM_HOOK_GLOBAL Global;
@@ -427,7 +469,17 @@ Filter_DxgkDdiQueryDeviceDescriptor(
 		ChildUid);
 
 	if (ChildUid == wddmAdapter->VirtualChild.Descriptor.ChildUid) {
-		status = STATUS_MONITOR_NO_DESCRIPTOR;
+		if (DeviceDescriptor->DescriptorOffset + DeviceDescriptor->DescriptorLength > sizeof(SampleEDID)) {
+			status = STATUS_MONITOR_NO_DESCRIPTOR;
+		}
+		else {
+			RtlCopyMemory(
+				DeviceDescriptor->DescriptorBuffer,
+				&SampleEDID[DeviceDescriptor->DescriptorOffset],
+				DeviceDescriptor->DescriptorLength
+			);
+			status = STATUS_SUCCESS;
+		}
 	}
 	else {
 		status = DriverInitData->DxgkDdiQueryDeviceDescriptor(
@@ -495,9 +547,15 @@ Filter_DxgkDdiEnumVidPnCofuncModality(
 	IN_CONST_PDXGKARG_ENUMVIDPNCOFUNCMODALITY_CONST     pEnumCofuncModality
 )
 {
+	NTSTATUS status;
 	PWDDM_ADAPTER wddmAdapter;
 	DRIVER_INITIALIZATION_DATA* DriverInitData;
-	NTSTATUS status;
+	const DXGK_VIDPN_INTERFACE* VidPnInterface = NULL;
+	D3DKMDT_HVIDPNTOPOLOGY hTopology = NULL;
+	const DXGK_VIDPNTOPOLOGY_INTERFACE* topologyInterface = NULL;
+	D3DDDI_VIDEO_PRESENT_SOURCE_ID sourceId = -1;
+	const D3DKMDT_VIDPN_PRESENT_PATH* pathInfo = NULL;
+	SIZE_T pathnum;
 
 	wddmAdapter = WddmHookFindAdapterFromContext(hAdapter);
 	ASSERT(wddmAdapter && wddmAdapter->Signature == WDDM_ADAPTER_SIGNATURE);
@@ -511,23 +569,114 @@ Filter_DxgkDdiEnumVidPnCofuncModality(
 
 	pr_info("original constraining VidPn\n");
 	Dump_DXGKARG_ENUMVIDPNCOFUNCMODALITY(wddmAdapter, pEnumCofuncModality);
-	
+
+#if 1
+	goto ByPass;
+
+	status = Filter_GetVidPnTopology(
+		wddmAdapter,
+		pEnumCofuncModality->hConstrainingVidPn,
+		&VidPnInterface,
+		&hTopology,
+		&topologyInterface
+	);
+	if (status != STATUS_SUCCESS) {
+		goto Cleanup;
+	}
+
+	status = topologyInterface->pfnGetPathSourceFromTarget(
+		hTopology, wddmAdapter->VirtualChild.Descriptor.ChildUid, &sourceId
+	);
+	if (status != STATUS_SUCCESS || sourceId == -1) {
+		goto ByPass;
+	}
+
+	status = topologyInterface->pfnAcquirePathInfo(
+		hTopology,
+		sourceId,
+		wddmAdapter->VirtualChild.Descriptor.ChildUid,
+		&pathInfo
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("acquire path source(%d) target(%d) failed, status(0x%08x)\n", status);
+		goto Cleanup;
+	}
+
+	pr_info("found %d target\n", 
+		wddmAdapter->VirtualChild.Descriptor.ChildUid);
+
+	/*
+	status = topologyInterface->pfnRemovePath(
+		hTopology, sourceId, wddmAdapter->VirtualChild.Descriptor.ChildUid
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("remove path source(%d) target(%d) failed, status(0x%08x)\n", status);
+		goto Cleanup;
+	}
+
+	status = topologyInterface->pfnGetNumPaths(
+		hTopology, &pathnum
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("get other path failed, status(0x%08x)\n", status);
+		goto Cleanup;
+	}
+
+	if (pathnum > 0) {
+		status = DriverInitData->DxgkDdiEnumVidPnCofuncModality(
+			wddmAdapter->MiniportDeviceContext,
+			pEnumCofuncModality
+		);
+
+		if (status != STATUS_SUCCESS) {
+			goto Cleanup;
+		}
+	}
+	*/
+
+	status = Filter_UpdateConstrainingVidPn(
+		wddmAdapter, 
+		pEnumCofuncModality, 
+		VidPnInterface,
+		hTopology, 
+		topologyInterface, 
+		pathInfo
+	);
+	if (status != STATUS_SUCCESS) {
+		goto Cleanup;
+	}
+
+	goto Cleanup;
+#else
+	status = Filter_HackConstrainingVidPn(wddmAdapter, pEnumCofuncModality);
+	if (status != STATUS_SUCCESS) {
+		goto Cleanup;
+	}
+
+	goto ByPass;
+#endif 
+
+ByPass:
 	status = DriverInitData->DxgkDdiEnumVidPnCofuncModality(
 		wddmAdapter->MiniportDeviceContext,
 		pEnumCofuncModality
 	);
 
-	if (NT_SUCCESS(status)) {
-		if (Global.fModifyConstrainingVidPn) {
-			status = Filter_HackConstainingVidPn(wddmAdapter, pEnumCofuncModality);
-		}
+Cleanup:
 
+	if (NT_SUCCESS(status)) {
 		pr_info("result constraining VidPn\n");
 		Dump_DXGKARG_ENUMVIDPNCOFUNCMODALITY(wddmAdapter, pEnumCofuncModality);
 	}
 
-	TraceUnindent();
+	if (pathInfo) {
+		ASSERT(hTopology);
+		ASSERT(topologyInterface);
 
+		topologyInterface->pfnReleasePathInfo(hTopology, pathInfo);
+	}
+
+	TraceUnindent();
 	pr_debug("<- Filter_DxgkDdiEnumVidPnCofuncModality(), status(0x%08x)\n", status);
 	return status;
 }
@@ -955,6 +1104,43 @@ Cleanup:
 	return status;
 }
 
+
+NTSTATUS Filter_VidPnHasPinnedTarget(
+	D3DKMDT_HVIDPN hVidPn,
+	const DXGK_VIDPN_INTERFACE* VidPnInterface,
+	D3DKMDT_VIDEO_PRESENT_TARGET_MODE_ID TargetId
+)
+{
+	// get the target mode set for this TargetId
+	D3DKMDT_HVIDPNTARGETMODESET hTargetModeSet;
+	const DXGK_VIDPNTARGETMODESET_INTERFACE* targetModeSetInterface;
+	const D3DKMDT_VIDPN_TARGET_MODE* pinnedTargetMode = NULL;
+
+	NTSTATUS status = VidPnInterface->pfnAcquireTargetModeSet(
+		hVidPn,
+		TargetId,
+		&hTargetModeSet,
+		&targetModeSetInterface
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("pfnAcquireTargetModeSet() failed, status(0x%08x)\n", status);
+		return status;
+	}
+
+	status = targetModeSetInterface->pfnAcquirePinnedModeInfo(
+		hTargetModeSet, &pinnedTargetMode
+	);
+	if (status != STATUS_SUCCESS) {
+		status = STATUS_NOT_FOUND;
+		goto Cleanup;
+	}
+
+	targetModeSetInterface->pfnReleaseModeInfo(hTargetModeSet, pinnedTargetMode);
+
+Cleanup:
+	return status;
+}
+
 NTSTATUS Filter_CreateNewSourceModeSet(
 	D3DKMDT_HVIDPN hVidPn,
 	const DXGK_VIDPN_INTERFACE* VidPnInterface,
@@ -1035,88 +1221,6 @@ Cleanup:
 	}
 
 	return status;
-}
-
-NTSTATUS Filter_HackConstainingVidPn(
-	PWDDM_ADAPTER wddmAdapter,
-	IN_CONST_PDXGKARG_ENUMVIDPNCOFUNCMODALITY_CONST pEnumCofuncModality
-)
-{
-	NTSTATUS status;
-	const DXGK_VIDPN_INTERFACE* VidPnInterface;
-	D3DKMDT_HVIDPNTOPOLOGY hVidPnTopology = NULL;
-	const DXGK_VIDPNTOPOLOGY_INTERFACE* topologyInterface = NULL;
-	const D3DKMDT_VIDPN_PRESENT_PATH* path = NULL;
-	const D3DKMDT_VIDPN_PRESENT_PATH* nextPath = NULL;
-
-	ASSERT(wddmAdapter->DxgkInterface.DxgkCbQueryVidPnInterface);
-
-	status = wddmAdapter->DxgkInterface.DxgkCbQueryVidPnInterface(
-		pEnumCofuncModality->hConstrainingVidPn,
-		DXGK_VIDPN_INTERFACE_VERSION_V1,
-		&VidPnInterface
-	);
-	if (status != STATUS_SUCCESS) {
-		pr_err("DxgkCbQueryVidPnInterface() failed, status(0x%08x)\n", status);
-		return status;
-	}
-
-	// get topology interface
-	//
-	status = VidPnInterface->pfnGetTopology(
-		pEnumCofuncModality->hConstrainingVidPn,
-		&hVidPnTopology,
-		&topologyInterface
-	);
-	if (status != STATUS_SUCCESS) {
-		pr_err("pfnGetTopology() failed, status(0x%08x)\n", status);
-		return status;
-	}
-
-	// iterate through each path in topology
-	//
-	status = topologyInterface->pfnAcquireFirstPathInfo(hVidPnTopology, &path);
-	while (status == STATUS_SUCCESS) {
-		
-		if (!((pEnumCofuncModality->EnumPivotType == D3DKMDT_EPT_VIDPNSOURCE) &&
-			  (pEnumCofuncModality->EnumPivot.VidPnSourceId == path->VidPnSourceId)))
-		{
-			status = Filter_VidPnHasPinnedSource(
-				pEnumCofuncModality->hConstrainingVidPn,
-				VidPnInterface,
-				path->VidPnSourceId
-			);
-
-			switch (status) {
-			case STATUS_SUCCESS:
-				break;
-
-			case STATUS_NOT_FOUND:
-				// no pinned source mode found, create new source mode set
-				//
-				status = Filter_CreateNewSourceModeSet(
-					pEnumCofuncModality->hConstrainingVidPn,
-					VidPnInterface,
-					path->VidPnSourceId
-				);
-				break;
-
-			default:
-				break;
-			}
-		}
-		
-		// get next path and release the presented
-		//
-		status = topologyInterface->pfnAcquireNextPathInfo(
-			hVidPnTopology,
-			path,
-			&nextPath
-		);
-		topologyInterface->pfnReleasePathInfo(hVidPnTopology, path);
-	}
-
-	return STATUS_SUCCESS;
 }
 
 
@@ -1232,3 +1336,484 @@ Cleanup:
 
 	return status;
 }
+
+NTSTATUS Filter_UpdateConstrainingVidPn(
+	PWDDM_ADAPTER wddmAdapter,
+	IN_CONST_PDXGKARG_ENUMVIDPNCOFUNCMODALITY_CONST EnumCofuncModality,
+	const DXGK_VIDPN_INTERFACE* VidPnInterface,
+	D3DKMDT_HVIDPNTOPOLOGY hTopology,
+	const DXGK_VIDPNTOPOLOGY_INTERFACE* TopologyInterface,
+	const D3DKMDT_VIDPN_PRESENT_PATH* pathInfo
+)
+{
+	NTSTATUS status;
+	// D3DKMDT_VIDPN_PRESENT_PATH* newPath = NULL;
+	D3DKMDT_VIDPN_PRESENT_PATH modifiedPath;
+	BOOLEAN presentPathModified = FALSE;
+
+	/*
+	status = TopologyInterface->pfnCreateNewPathInfo(hTopology, &newPath);
+	if (status != STATUS_SUCCESS) {
+		pr_err("create new pathinfo failed, status(0x%08x)\n", status);
+		goto Cleanup;
+	}
+
+	RtlCopyMemory(newPath, pathInfo, sizeof(*pathInfo));
+
+	status = TopologyInterface->pfnAddPath(hTopology, newPath);
+	if (status != STATUS_SUCCESS) {
+		pr_info("add newPath failed, status(0x%08x)\n", status);
+		goto Cleanup;
+	}
+
+	pathInfo = newPath;
+	newPath = NULL;
+	*/
+
+	// If this source mode set isn't the pivot point, inspect the source
+	// mode set and potentially add cofunctional modes
+	if (!((EnumCofuncModality->EnumPivotType == D3DKMDT_EPT_VIDPNSOURCE) &&
+		  (EnumCofuncModality->EnumPivot.VidPnSourceId == pathInfo->VidPnSourceId)))
+	{
+		status = Filter_VidPnHasPinnedSource(
+			EnumCofuncModality->hConstrainingVidPn,
+			VidPnInterface,
+			pathInfo->VidPnSourceId
+		);
+		switch (status) {
+		case STATUS_SUCCESS: break;
+		case STATUS_NOT_FOUND:
+			status = Filter_CreateSourceModeSetForTarget(
+				EnumCofuncModality->hConstrainingVidPn,
+				VidPnInterface,
+				pathInfo->VidPnSourceId,
+				pathInfo->VidPnTargetId
+			);
+			if (status != STATUS_SUCCESS) {
+				goto Cleanup;
+			}
+			break;
+		default:
+			goto Cleanup;
+		}
+	}
+
+	// If this target mode set isn't the pivot point, inspect the target
+	// mode set and potentially add cofunctional modes
+	if (!((EnumCofuncModality->EnumPivotType == D3DKMDT_EPT_VIDPNTARGET) &&
+		  (EnumCofuncModality->EnumPivot.VidPnTargetId == pathInfo->VidPnTargetId)))
+	{
+		status = Filter_VidPnHasPinnedTarget(
+			EnumCofuncModality->hConstrainingVidPn,
+			VidPnInterface,
+			pathInfo->VidPnTargetId
+		);
+
+		switch (status) {
+		case STATUS_SUCCESS: break;
+		case STATUS_NOT_FOUND:
+			status = Filter_CreateTargetModeSet(
+				EnumCofuncModality->hConstrainingVidPn,
+				VidPnInterface,
+				pathInfo->VidPnTargetId
+			);
+			if (status != STATUS_SUCCESS) {
+				goto Cleanup;
+			}
+			break;
+		default:
+			goto Cleanup;
+		}
+	} // target mode set
+
+	modifiedPath = *pathInfo;
+
+	// SCALING: If this path's scaling isn't the pivot point, do work on the scaling support
+	if (!((EnumCofuncModality->EnumPivotType == D3DKMDT_EPT_SCALING) &&
+		  (EnumCofuncModality->EnumPivot.VidPnSourceId == pathInfo->VidPnSourceId) &&
+		  (EnumCofuncModality->EnumPivot.VidPnTargetId == pathInfo->VidPnTargetId)))
+	{
+		// If the scaling is unpinned, then modify the scaling support field
+		if (pathInfo->ContentTransformation.Scaling == D3DKMDT_VPPS_UNPINNED)
+		{
+			// Identity and centered scaling are supported, but not any stretch modes
+			RtlZeroMemory(
+				&modifiedPath.ContentTransformation.ScalingSupport,
+				sizeof(D3DKMDT_VIDPN_PRESENT_PATH_SCALING_SUPPORT)
+			);
+
+			// We do not support scaling
+			modifiedPath.ContentTransformation.ScalingSupport.Identity = TRUE;
+
+			presentPathModified = TRUE;
+		}
+	} // scaling
+
+	// ROTATION: If this path's rotation isn't the pivot point, do work on the rotation support
+	if (!((EnumCofuncModality->EnumPivotType != D3DKMDT_EPT_ROTATION) &&
+	  	  (EnumCofuncModality->EnumPivot.VidPnSourceId == pathInfo->VidPnSourceId) &&
+		  (EnumCofuncModality->EnumPivot.VidPnTargetId == pathInfo->VidPnTargetId)))
+	{
+		// If the rotation is unpinned, then modify the rotation support field
+		if (pathInfo->ContentTransformation.Rotation == D3DKMDT_VPPR_UNPINNED)
+		{
+			RtlZeroMemory(
+				&modifiedPath.ContentTransformation.RotationSupport,
+				sizeof(D3DKMDT_VIDPN_PRESENT_PATH_ROTATION_SUPPORT)
+			);
+
+			// We do not support rotation
+			modifiedPath.ContentTransformation.RotationSupport.Identity = TRUE;
+			modifiedPath.ContentTransformation.RotationSupport.Offset0 = TRUE;
+
+			presentPathModified = TRUE;
+		}
+	} // rotation
+
+	// Update the content transformation
+	if (presentPathModified) {
+		// The correct path will be found by this function and the appropriate fields updated
+		status = TopologyInterface->pfnUpdatePathSupportInfo(
+			hTopology,
+			&modifiedPath
+		);
+		if (status != STATUS_SUCCESS) {
+			goto Cleanup;
+		}
+	}
+
+	pathInfo = NULL;
+
+Cleanup:
+
+	return status;
+}
+
+NTSTATUS Filter_HackConstrainingVidPn(
+	PWDDM_ADAPTER WddmAdapter,
+	IN_CONST_PDXGKARG_ENUMVIDPNCOFUNCMODALITY_CONST EnumCofuncModality
+)
+{
+	DRIVER_INITIALIZATION_DATA* DriverInitData;
+	NTSTATUS status;
+	const DXGK_VIDPN_INTERFACE* VidPnInterface;
+	D3DKMDT_HVIDPNTOPOLOGY hTopology;
+	const DXGK_VIDPNTOPOLOGY_INTERFACE* topologyInterface;
+	D3DDDI_VIDEO_PRESENT_SOURCE_ID sourceId;
+	D3DDDI_VIDEO_PRESENT_TARGET_ID targetId;
+	const D3DKMDT_VIDPN_PRESENT_PATH* pathInfo = NULL;
+	D3DKMDT_VIDPN_PRESENT_PATH modifiedPath;
+	BOOLEAN presentPathModified = FALSE;
+
+	targetId = WddmAdapter->VirtualChild.Descriptor.ChildUid;
+
+	status = Filter_GetVidPnTopology(
+		WddmAdapter,
+		EnumCofuncModality->hConstrainingVidPn,
+		&VidPnInterface,
+		&hTopology,
+		&topologyInterface
+	);
+	if (status != STATUS_SUCCESS) {
+		goto Cleanup;
+	}
+
+	status = topologyInterface->pfnGetPathSourceFromTarget(
+		hTopology, targetId, &sourceId
+	);
+	if (status != STATUS_SUCCESS) {
+		status = STATUS_SUCCESS;
+		goto Cleanup;
+	}
+
+	status = topologyInterface->pfnAcquirePathInfo(
+		hTopology, sourceId, targetId, &pathInfo
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("acquire path source(%d) target(%d) failed, status(0x%08x)\n", 
+			sourceId, targetId, status);
+		goto Cleanup;
+	}
+
+	// If this source mode set isn't the pivot point, inspect the source
+	// mode set and potentially add cofunctional modes
+	if (!((EnumCofuncModality->EnumPivotType == D3DKMDT_EPT_VIDPNSOURCE) &&
+		  (EnumCofuncModality->EnumPivot.VidPnSourceId == pathInfo->VidPnSourceId)))
+	{
+		status = Filter_VidPnHasPinnedSource(
+			EnumCofuncModality->hConstrainingVidPn,
+			VidPnInterface,
+			sourceId
+		);
+		switch (status) {
+		case STATUS_SUCCESS: break;
+		case STATUS_NOT_FOUND:
+			status = Filter_CreateSourceModeSetForTarget(
+				EnumCofuncModality->hConstrainingVidPn,
+				VidPnInterface,
+				sourceId,
+				targetId
+			);
+			if (status != STATUS_SUCCESS) {
+				goto Cleanup;
+			}
+			break;
+		default:
+			goto Cleanup;
+		}
+	} 
+
+	// If this target mode set isn't the pivot point, inspect the target
+	// mode set and potentially add cofunctional modes
+	if (!((EnumCofuncModality->EnumPivotType == D3DKMDT_EPT_VIDPNTARGET) &&
+		  (EnumCofuncModality->EnumPivot.VidPnTargetId == pathInfo->VidPnTargetId)))
+	{
+		status = Filter_VidPnHasPinnedTarget(
+			EnumCofuncModality->hConstrainingVidPn,
+			VidPnInterface,
+			targetId
+		);
+
+		switch (status) {
+		case STATUS_SUCCESS: break;
+		case STATUS_NOT_FOUND:
+			status = Filter_CreateTargetModeSet(
+				EnumCofuncModality->hConstrainingVidPn,
+				VidPnInterface,
+				targetId
+			);
+			if (status != STATUS_SUCCESS) {
+				goto Cleanup;
+			}
+			break;
+		default:
+			goto Cleanup;
+		}
+	} // target mode set
+
+	modifiedPath = *pathInfo;
+
+	// SCALING: If this path's scaling isn't the pivot point, do work on the scaling support
+	if (!((EnumCofuncModality->EnumPivotType == D3DKMDT_EPT_SCALING) &&
+		  (EnumCofuncModality->EnumPivot.VidPnSourceId == pathInfo->VidPnSourceId) &&
+		  (EnumCofuncModality->EnumPivot.VidPnTargetId == pathInfo->VidPnTargetId)))
+	{
+		// If the scaling is unpinned, then modify the scaling support field
+		if (pathInfo->ContentTransformation.Scaling == D3DKMDT_VPPS_UNPINNED)
+		{
+			// Identity and centered scaling are supported, but not any stretch modes
+			RtlZeroMemory(
+				&modifiedPath.ContentTransformation.ScalingSupport,
+				sizeof(D3DKMDT_VIDPN_PRESENT_PATH_SCALING_SUPPORT)
+			);
+
+			// We do not support scaling
+			modifiedPath.ContentTransformation.ScalingSupport.Identity = TRUE;
+
+			presentPathModified = TRUE;
+		}
+	} // scaling
+
+	// ROTATION: If this path's rotation isn't the pivot point, do work on the rotation support
+	if (!((EnumCofuncModality->EnumPivotType != D3DKMDT_EPT_ROTATION) &&
+		  (EnumCofuncModality->EnumPivot.VidPnSourceId == pathInfo->VidPnSourceId) &&
+		  (EnumCofuncModality->EnumPivot.VidPnTargetId == pathInfo->VidPnTargetId)))
+	{
+		// If the rotation is unpinned, then modify the rotation support field
+		if (pathInfo->ContentTransformation.Rotation == D3DKMDT_VPPR_UNPINNED)
+		{
+			RtlZeroMemory(
+				&modifiedPath.ContentTransformation.RotationSupport,
+				sizeof(D3DKMDT_VIDPN_PRESENT_PATH_ROTATION_SUPPORT)
+			);
+
+			// We do not support rotation
+			modifiedPath.ContentTransformation.RotationSupport.Identity = TRUE;
+			modifiedPath.ContentTransformation.RotationSupport.Offset0 = TRUE;
+
+			presentPathModified = TRUE;
+		}
+	} // rotation
+
+	// Update the content transformation
+	if (presentPathModified) {
+		// The correct path will be found by this function and the appropriate fields updated
+		status = topologyInterface->pfnUpdatePathSupportInfo(
+			hTopology,
+			&modifiedPath
+		);
+		if (status != STATUS_SUCCESS) {
+			goto Cleanup;
+		}
+	}
+	
+Cleanup:
+	if (pathInfo) {
+		ASSERT(hTopology);
+		ASSERT(topologyInterface);
+
+		topologyInterface->pfnReleasePathInfo(hTopology, pathInfo);
+	}
+
+	return status;
+}
+
+NTSTATUS Filter_CreateSourceModeSetForTarget(
+	D3DKMDT_HVIDPN hVidPn,
+	const DXGK_VIDPN_INTERFACE* VidPnInterface,
+	D3DDDI_VIDEO_PRESENT_SOURCE_ID VidPnSourceId,
+	D3DDDI_VIDEO_PRESENT_TARGET_ID VidPnTargetId
+)
+{
+	NTSTATUS status;
+	D3DKMDT_HVIDPNSOURCEMODESET hSourceModeSet = NULL;
+	const DXGK_VIDPNSOURCEMODESET_INTERFACE* sourceModeSetInterface;
+	D3DKMDT_VIDPN_SOURCE_MODE* sourcemode = NULL;
+
+	UNREFERENCED_PARAMETER(VidPnTargetId);
+
+	status = VidPnInterface->pfnCreateNewSourceModeSet(
+		hVidPn, VidPnSourceId, &hSourceModeSet, &sourceModeSetInterface
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("create source mode set for source(%d) failed, status(0x%08x)\n",
+			VidPnSourceId, status);
+		goto Cleanup;
+	}
+
+	status = sourceModeSetInterface->pfnCreateNewModeInfo(
+		hSourceModeSet, &sourcemode
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_info("create source mode failed, status(0x%08x)\n", status);
+		goto Cleanup;
+	}
+	
+	sourcemode->Type = D3DKMDT_RMT_GRAPHICS;
+	sourcemode->Format.Graphics.PrimSurfSize.cx = 1024;
+	sourcemode->Format.Graphics.PrimSurfSize.cy = 768;
+	sourcemode->Format.Graphics.VisibleRegionSize.cx = 1024;
+	sourcemode->Format.Graphics.VisibleRegionSize.cy = 1768;
+	sourcemode->Format.Graphics.Stride = 0x1000;
+	sourcemode->Format.Graphics.PixelFormat = D3DDDIFMT_A8R8G8B8;
+	sourcemode->Format.Graphics.ColorBasis = D3DKMDT_CB_SCRGB;
+	sourcemode->Format.Graphics.PixelValueAccessMode = D3DKMDT_PVAM_DIRECT;
+
+	status = sourceModeSetInterface->pfnAddMode(
+		hSourceModeSet, 
+		sourcemode
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("add source mode failed, status(0x%08x)\n", status);
+		goto Cleanup;
+	}
+
+	sourcemode = NULL;
+
+	status = VidPnInterface->pfnAssignSourceModeSet(
+		hVidPn, VidPnSourceId, hSourceModeSet
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("assign source mode set failed, status(0x%08x)\n", status);
+		goto Cleanup;
+	}
+
+	hSourceModeSet = NULL;
+	sourceModeSetInterface = NULL;
+
+Cleanup:
+	if (sourcemode) {
+		ASSERT(hSourceModeSet);
+		ASSERT(sourceModeSetInterface != NULL);
+
+		sourceModeSetInterface->pfnReleaseModeInfo(hSourceModeSet, sourcemode);
+	}
+
+	if (hSourceModeSet != NULL) {
+		VidPnInterface->pfnReleaseSourceModeSet(hVidPn, hSourceModeSet);
+	}
+
+	return STATUS_SUCCESS;
+}
+
+NTSTATUS Filter_CreateTargetModeSet(
+	D3DKMDT_HVIDPN hVidPn,
+	const DXGK_VIDPN_INTERFACE* VidPnInterface,
+	D3DDDI_VIDEO_PRESENT_SOURCE_ID VidPnTargetId
+)
+{
+	NTSTATUS status;
+	D3DKMDT_HVIDPNTARGETMODESET hTargetModeSet = NULL;
+	const DXGK_VIDPNTARGETMODESET_INTERFACE* targetModeSetInterface;
+	D3DKMDT_VIDPN_TARGET_MODE* targetmode = NULL;
+
+	status = VidPnInterface->pfnCreateNewTargetModeSet(
+		hVidPn, VidPnTargetId, &hTargetModeSet, &targetModeSetInterface
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("create target mode set failed, status(0x%08x)\n", status);
+		goto Cleanup;
+	}
+
+	status = targetModeSetInterface->pfnCreateNewModeInfo(
+		hTargetModeSet, 
+		&targetmode
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("create new target mode failed, status(0x%08x)\n", status);
+		goto Cleanup;
+	}
+
+	targetmode->Id = VidPnTargetId;
+	targetmode->VideoSignalInfo.VideoStandard = D3DKMDT_VSS_OTHER;
+	targetmode->VideoSignalInfo.TotalSize.cx = 1024;
+	targetmode->VideoSignalInfo.TotalSize.cy = 768;
+	targetmode->VideoSignalInfo.ActiveSize.cx = 1024;
+	targetmode->VideoSignalInfo.ActiveSize.cy = 768;
+
+	targetmode->VideoSignalInfo.VSyncFreq.Numerator = 148500000;
+	targetmode->VideoSignalInfo.VSyncFreq.Denominator = 2475000;
+	targetmode->VideoSignalInfo.HSyncFreq.Numerator = 67500;
+	targetmode->VideoSignalInfo.HSyncFreq.Denominator = 1;
+	targetmode->VideoSignalInfo.PixelRate = 148500000;
+	targetmode->VideoSignalInfo.ScanLineOrdering = D3DDDI_VSSLO_PROGRESSIVE;
+
+	targetmode->Preference = D3DKMDT_MP_PREFERRED;
+
+	status = targetModeSetInterface->pfnAddMode(
+		hTargetModeSet, 
+		targetmode
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("add target mode failed, status(0x%08x)\n", status);
+		goto Cleanup;
+	}
+
+	targetmode = NULL;
+
+	status = VidPnInterface->pfnAssignTargetModeSet(
+		hVidPn, VidPnTargetId, hTargetModeSet
+	);
+	if (status != STATUS_SUCCESS) {
+		pr_err("assign target mode set failed, status(0x%08x)\n", status);
+		goto Cleanup;
+	}
+
+	hTargetModeSet = NULL;
+
+Cleanup:
+
+	if (targetmode != NULL) {
+		ASSERT(hTargetModeSet);
+		ASSERT(targetModeSetInterface);
+
+		targetModeSetInterface->pfnReleaseModeInfo(hTargetModeSet, targetmode);
+	}
+
+	if (hTargetModeSet != NULL) {
+		VidPnInterface->pfnReleaseTargetModeSet(hVidPn, hTargetModeSet);
+	}
+
+	return status;
+}
+
